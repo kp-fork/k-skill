@@ -33,9 +33,32 @@ def ensure_runtime() -> None:
 
     py = VENV_DIR / "bin" / "python"
 
+    def candidate_python_executables() -> list[str]:
+        candidates = [sys.executable]
+        candidates.extend(
+            found for name in ("python3.13", "python3.12", "python3.11", "python3")
+            if (found := shutil.which(name))
+        )
+        seen: set[str] = set()
+        unique: list[str] = []
+        for candidate in candidates:
+            resolved = str(Path(candidate).resolve())
+            if resolved not in seen:
+                seen.add(resolved)
+                unique.append(candidate)
+        return unique
+
     def create_venv() -> None:
         CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-        subprocess.check_call([sys.executable, "-m", "venv", str(VENV_DIR)])
+        errors: list[str] = []
+        for python in candidate_python_executables():
+            shutil.rmtree(VENV_DIR, ignore_errors=True)
+            try:
+                subprocess.check_call([python, "-m", "venv", str(VENV_DIR)])
+                return
+            except (OSError, subprocess.CalledProcessError) as exc:
+                errors.append(f"{python}: {exc}")
+        raise RuntimeError("Unable to create flight-ticket-search venv with available Python interpreters: " + "; ".join(errors))
 
     def venv_has_fast_flights() -> bool:
         if not py.exists():
