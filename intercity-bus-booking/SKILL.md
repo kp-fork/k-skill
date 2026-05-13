@@ -68,7 +68,11 @@ ic=0
 iv=0
 depr_Dt=YYYYMMDD
 depr_Time=000000
+bef_Aft_Dvs=D
+req_Rec_Num=10
 ```
+
+`bef_Aft_Dvs` and `req_Rec_Num` are required hidden fields from the browser JavaScript `readAlcnListEntry(...)`. If they are omitted, Tmoney can return a generic error page with no schedules.
 
 Parse schedule buttons/rows. The next-stage parameters are often embedded in `readSasFeeInf(...)` onclick arguments.
 
@@ -111,6 +115,21 @@ rtrp_Depr_Dt
 
 A successful response lands on the official `카드정보 입력` page and includes a temporary seat hold identifier such as `sats_Pcpy_Id`.
 
+## Timetable Helper
+
+For read-only timetable lookup, use the bundled helper before attempting browser automation:
+
+```bash
+python3 intercity-bus-booking/scripts/intercity_bus_search.py \
+  --depart-code 0511601 \
+  --arrive-code 2482701 \
+  --depart-name 동서울 \
+  --arrive-name 속초 \
+  --date 20260520
+```
+
+The helper starts a cookie-backed session, posts the browser-required timetable fields, parses `readSasFeeInf(...)`, and prints JSON with departure time, company, class, fares, and remaining/total seats. It intentionally does not create temporary holds or submit payment data.
+
 ## Checkout-Entry Link Helper
 
 A helper-served HTML page can auto-submit a POST form directly to:
@@ -145,13 +164,15 @@ When a checkout-entry helper is created, say that it opens the official Tmoney c
 
 1. **Mixing terminal code systems.** Tmoney 시외버스 codes are not KOBUS codes.
 2. **Assuming checkout-entry equals final payment.** `readPcpySats.do` can open the card-information page, but final payment remains a separate manual step.
-3. **Replaying stale hold payloads.** A repeated POST for the same route/seat can fail or create confusing results. Generate a fresh seat-stage payload for real use.
-4. **Skipping cancellation/back flow.** Use the official cancellation/back form (`pcpyCanc=C` via `readSatsFee.do` when available) for abandoned holds.
-5. **Overusing browser automation.** Use browser only for endpoint discovery or visual verification after HTTP probing.
+3. **Omitting hidden timetable fields.** `readAlcnList.do` needs `bef_Aft_Dvs=D` and `req_Rec_Num=10`; without them it may return a generic `errorCont` page of about 13 KB instead of schedule rows.
+4. **Replaying stale hold payloads.** A repeated POST for the same route/seat can fail or create confusing results. Generate a fresh seat-stage payload for real use.
+5. **Skipping cancellation/back flow.** Use the official cancellation/back form (`pcpyCanc=C` via `readSatsFee.do` when available) for abandoned holds.
+6. **Overusing browser automation.** Use browser only for endpoint discovery or visual verification after HTTP probing.
 
 ## Verification Checklist
 
 - [ ] Route/terminal codes were resolved from Tmoney 시외버스, not guessed or copied from KOBUS.
+- [ ] Timetable POST included `bef_Aft_Dvs=D` and `req_Rec_Num=10`.
 - [ ] Timetable response was parsed for schedule rows/buttons and next-stage parameters.
 - [ ] Fare/seat-stage response contains `form#readPcpySats` and expected hidden fields.
 - [ ] Checkout-entry response contains `카드정보 입력` and a hold identifier such as `sats_Pcpy_Id` before reporting success.

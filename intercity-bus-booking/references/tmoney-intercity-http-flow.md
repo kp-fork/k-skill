@@ -1,6 +1,6 @@
 # Tmoney 시외버스 HTTP/API Probe Notes
 
-Session-proven on 2026-05-08. Goal: avoid browser automation where possible.
+Session-proven on 2026-05-08 and re-verified on 2026-05-13. Goal: avoid browser automation where possible.
 
 ## Base
 
@@ -24,10 +24,11 @@ Example tested route/date:
 동서울(0511601) -> 속초(2482701), 2026-05-09
 ```
 
-Observed result:
+Observed results:
 
 ```text
-14 reservation buttons/schedules
+2026-05-09: 14 reservation buttons/schedules
+2026-05-20: 20 readSasFeeInf schedule buttons, first departure 06:05 금강고속 우등, 24/28 seats
 ```
 
 Typical POST fields:
@@ -43,7 +44,11 @@ ic=0
 iv=0
 depr_Dt=YYYYMMDD
 depr_Time=000000
+bef_Aft_Dvs=D
+req_Rec_Num=10
 ```
+
+`bef_Aft_Dvs=D` and `req_Rec_Num=10` are not optional. They are appended by the site JavaScript (`readAlcnListEntry(bef_Aft_Dvs, req_Rec_Num)`) before the browser submits `#onewayInfo`. Omitting them returned a generic error page (`errorCont`, about 13,770 bytes) with no `readSasFeeInf(...)` schedules in live probing.
 
 The next-stage values are embedded in `readSasFeeInf(...)` onclick calls. Example prefix:
 
@@ -113,5 +118,6 @@ A POST back to `/otck/readSatsFee.do` with `pcpyCanc=C` and the hold fields retu
 
 - Login was not required for timetable lookup, fare/seat-stage entry, or card-information page entry in the tested flow.
 - CAPTCHA was not observed in the tested flow.
+- A generic `errorCont` response usually means the posted form contract is incomplete, not necessarily that the route is unavailable; first verify `bef_Aft_Dvs` and `req_Rec_Num`.
 - Payment/card-info submission is separate and should not be automated without explicit confirmation.
 - Terminal codes are Tmoney-specific and must not be mixed with KOBUS codes.

@@ -24,11 +24,24 @@
 ## 기본 흐름
 
 1. 쿠키 jar를 만들고 티머니 시외버스 페이지를 열어 세션을 시작한다.
-2. `POST /otck/readAlcnList.do` 로 배차를 조회한다.
+2. `POST /otck/readAlcnList.do` 로 배차를 조회한다. 이때 브라우저 JS가 붙이는 `bef_Aft_Dvs=D`, `req_Rec_Num=10`을 반드시 같이 보낸다.
 3. 결과의 `readSasFeeInf(...)` 인자를 파싱해 후보를 정리한다.
 4. 선택 후보는 `POST /otck/readSatsFee.do` 로 좌석/요금 단계 진입을 확인한다.
 5. 사용자가 원하면 `POST /otck/readPcpySats.do` 로 공식 카드정보 입력 페이지에 진입하도록 handoff한다.
 6. 뒤로가기/취소성 이동으로 좌석 선택 단계에 복귀해 임시 선점을 해제할 수 있는지 확인한다.
+
+## read-only 조회 helper
+
+```bash
+python3 intercity-bus-booking/scripts/intercity_bus_search.py \
+  --depart-code 0511601 \
+  --arrive-code 2482701 \
+  --depart-name 동서울 \
+  --arrive-name 속초 \
+  --date 20260520
+```
+
+이 helper는 쿠키 세션을 시작하고 공식 배차 조회 POST를 수행한 뒤 출발시각, 운수사, 등급, 요금, 잔여/총 좌석을 JSON으로 출력한다. 임시 좌석 선점이나 결제 단계는 수행하지 않는다.
 
 ## 주의할 점
 
@@ -36,3 +49,4 @@
 - 티머니 시외버스 터미널 코드는 KOBUS 고속버스 코드와 다르므로 혼용하지 않는다.
 - 일부 표면은 `txbus` 계열 URL과 연결될 수 있지만, 검증된 기본 URL은 `intercitybus.tmoney.co.kr` 이다.
 - stateless POST보다 쿠키와 referer를 유지하는 흐름이 안정적이다.
+- `bef_Aft_Dvs` 또는 `req_Rec_Num`을 누락하면 실제 배차가 있어도 `errorCont`가 포함된 일반 오류 페이지가 반환될 수 있다.
