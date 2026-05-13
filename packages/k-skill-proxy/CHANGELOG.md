@@ -1,5 +1,11 @@
 # k-skill-proxy
 
+## 0.2.1
+
+### Patch Changes
+
+- 2ff51db: refactor: remove realtyprice route (moved to standalone gongsijiga-search package)
+
 ## 0.2.0
 
 ### Minor Changes
