@@ -9,6 +9,7 @@ const {
   normalizeSearchOptions,
   normalizeDetailOptions,
   parseListHtml,
+  parseAttachments,
   parseDetailHtml,
   searchNotices,
   getNoticeDetail
@@ -53,6 +54,13 @@ const initParam = { downList: [{"brdId":"GS0401","seq":"304371","fileSeq":"1","f
 </tbody></table></div>
 <form name="mainform"><input type="hidden" name="srchWord" id="srchWord" value="행복주택" /></form>
 <ul class="personInfo"><li><span>담당부서</span> : 공공주택공급부</li></ul>
+</body></html>`
+
+const BLOCKED_HTML = `<!doctype html><html><body>
+  <main>
+    <h1>서비스 점검 안내</h1>
+    <p>NetFunnel 대기열 또는 로그인 확인 후 다시 이용해 주세요.</p>
+  </main>
 </body></html>`
 
 test("normalizeSearchOptions defaults keyword searches to SH title scope", () => {
@@ -147,6 +155,14 @@ test("parseListHtml normalizes public helper inputs before parsing", () => {
   assert.match(result.source.url, /srchTp=0/)
 })
 
+test("parseListHtml warns when SH returns block or maintenance HTML without list markup", () => {
+  const result = parseListHtml(BLOCKED_HTML, { keyword: "행복주택", category: "임대" })
+
+  assert.equal(result.summary.returned_count, 0)
+  assert.equal(result.summary.total_count, null)
+  assert.match(result.warnings.join("\n"), /unexpected SH list HTML.*NetFunnel.*로그인.*점검/i)
+})
+
 test("parseListHtml applies conservative status filtering after parsing", () => {
   const closed = parseListHtml(LIST_HTML, normalizeSearchOptions({ status: "closed" }))
   const open = parseListHtml(LIST_HTML, normalizeSearchOptions({ status: "open" }))
@@ -164,6 +180,29 @@ test("parseDetailHtml normalizes public helper inputs before parsing", () => {
   assert.equal(detail.category_name, "주택임대")
   assert.equal(detail.attachments.length, 2)
   assert.match(detail.detail_url, /multi_itm_seq=2/)
+})
+
+test("parseDetailHtml warns when SH returns block or maintenance HTML without detail markup", () => {
+  const detail = parseDetailHtml(BLOCKED_HTML, { seq: "304371", category: "임대" })
+
+  assert.equal(detail.seq, "304371")
+  assert.equal(detail.title, undefined)
+  assert.deepEqual(detail.attachments, [])
+  assert.match(detail.warnings.join("\n"), /unexpected SH detail HTML.*NetFunnel.*로그인.*점검/i)
+})
+
+test("parseAttachments exposes only SH-origin htmlConverter preview URLs", () => {
+  const html = DETAIL_HTML.replace(
+    "/app/com/util/htmlConverter.do?brd_id=GS0401&amp;seq=304371&amp;data_tp=A&amp;file_seq=1",
+    "https://evil.example/htmlConverter.do?brd_id=GS0401&amp;seq=304371&amp;data_tp=A&amp;file_seq=1"
+  )
+
+  const attachments = parseAttachments(html)
+
+  assert.equal(attachments[0].filename, "2025년 2차 행복주택 예비3차 계약결과.pdf")
+  assert.equal(attachments[0].preview_url, undefined)
+  assert.equal(attachments[0].file_seq, undefined)
+  assert.equal(attachments[1].preview_url, "https://www.i-sh.co.kr/app/com/util/htmlConverter.do?brd_id=GS0401&seq=304371&data_tp=A&file_seq=2")
 })
 
 test("parseDetailHtml extracts real attachments by existFile onclick, not icon templates", () => {

@@ -265,6 +265,28 @@ function statusMatches(itemStatus, requestedStatus) {
   return itemStatus === requestedStatus
 }
 
+function findUpstreamBlockMarkers(html) {
+  const text = stripTags(html)
+  const markers = [
+    ["NetFunnel", /NetFunnel/i],
+    ["CAPTCHA", /captcha|보안문자/i],
+    ["로그인", /로그인|login/i],
+    ["점검", /점검|maintenance/i],
+    ["대기열", /대기열|queue/i],
+    ["차단", /차단|block/i]
+  ]
+  return markers.filter(([, pattern]) => pattern.test(text)).map(([label]) => label)
+}
+
+function buildUnexpectedHtmlWarnings(html, expectedMarkupFound, label) {
+  if (expectedMarkupFound) return []
+  const markers = findUpstreamBlockMarkers(html)
+  if (markers.length > 0) {
+    return [`unexpected SH ${label} HTML; possible block/maintenance markers: ${markers.join(", ")}`]
+  }
+  return [`unexpected SH ${label} HTML; expected public SH ${label} markup was not found.`]
+}
+
 function parseListRows(html, options = {}) {
   const normalized = normalizeSearchOptions(options)
   const config = CATEGORY_CONFIGS[normalized.category]
@@ -312,6 +334,7 @@ function parseNumberOrNull(value) {
 function parseListHtml(html, options = {}) {
   const normalized = normalizeSearchOptions(options)
   const items = parseListRows(html, normalized).slice(0, normalized.pageSize)
+  const hasExpectedListMarkup = /<div\b[^>]*id=["']listTb["']/i.test(String(html || "")) || /<tbody[^>]*>[\s\S]*getDetailView\(/i.test(String(html || ""))
   const result = {
     query: {
       keyword: normalized.keyword || null,
@@ -331,7 +354,7 @@ function parseListHtml(html, options = {}) {
       url: buildSearchUrl(normalized).toString(),
       proxy: false
     },
-    warnings: [],
+    warnings: buildUnexpectedHtmlWarnings(html, hasExpectedListMarkup, "list"),
     items
   }
   if (normalized.status) {
@@ -378,7 +401,7 @@ function parseAttachments(html) {
     const previewUrls = anchors
       .map((anchor) => anchor.href)
       .filter((href) => /htmlConverter\.do/i.test(href))
-      .map((href) => new URL(href, SH_BASE_URL).toString())
+      .map(normalizeAttachmentPreviewUrl)
     const fileAnchors = anchors.filter((anchor) => /\bbtnAttach\b/i.test(anchor.className) && /existFile\(\s*['"]?\d+['"]?\s*\)/i.test(anchor.onclick) && !isAttachmentIconLabel(anchor.text))
     fileAnchors.forEach((anchor, index) => {
       const previewUrl = previewUrls[index] || null
@@ -396,6 +419,17 @@ function parseAttachments(html) {
   return attachments
 }
 
+function normalizeAttachmentPreviewUrl(href) {
+  try {
+    const url = new URL(href, SH_BASE_URL)
+    if (url.origin !== SH_BASE_URL) return null
+    if (url.pathname !== "/app/com/util/htmlConverter.do") return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
 function extractDepartment(html) {
   const personInfoMatch = String(html || "").match(/<ul\b[^>]*class=["'][^"']*personInfo[^"']*["'][^>]*>([\s\S]*?)<\/ul>/i)
   if (!personInfoMatch) return null
@@ -406,6 +440,7 @@ function extractDepartment(html) {
 function parseDetailHtml(html, options = {}) {
   const normalized = normalizeDetailOptions(options)
   const config = CATEGORY_CONFIGS[normalized.category]
+  const source = String(html || "")
   const titleMatch = String(html || "").match(/<div\b[^>]*class=["'][^"']*detailTable[^"']*firgs0401Table[^"']*["'][^>]*>[\s\S]*?<caption>([\s\S]*?)<\/caption>/i) ||
     String(html || "").match(/<thead>[\s\S]*?<th\b[^>]*colspan=["']2["'][^>]*>([\s\S]*?)<\/th>/i)
   const registeredMatch = String(html || "").match(/<strong>\s*등록일\s*:\s*<\/strong>\s*([0-9]{4}[-.][0-9]{2}[-.][0-9]{2})/i)
@@ -424,7 +459,8 @@ function parseDetailHtml(html, options = {}) {
     status: classifyNoticeStatus(title),
     status_basis: "title_text_classifier",
     content_text: trimOrNull(stripTags(contentMatch ? contentMatch[1] : "")),
-    detail_url: buildDetailUrl(normalized).toString()
+    detail_url: buildDetailUrl(normalized).toString(),
+    warnings: buildUnexpectedHtmlWarnings(html, /detailTable|class=["']cont["']|firgs0401Table/i.test(source), "detail")
   })
   detail.attachments = attachments
   if (normalized.includeHtml) detail.html = html
