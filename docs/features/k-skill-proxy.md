@@ -66,38 +66,32 @@ client/skill -> k-skill-proxy -> upstream public API
 
 ## 프로덕션 배포 구조
 
-프로덕션 proxy 서버는 개발 repo와 분리된 별도 clone으로 운영한다.
+프로덕션 proxy 서버는 **Google Cloud Run**에서 운영한다.
 
-- 배포 디렉토리: `~/.local/share/k-skill-proxy` (main 브랜치 단독 clone)
-- PM2 프로세스: `k-skill-proxy`
-- Cloudflare Tunnel ingress: `k-skill-proxy.nomadamas.org -> http://localhost:4020`
+- GCP project: `k-skill-proxy`
+- Region: `asia-northeast1` (도쿄)
+- Cloud Run service: `k-skill-proxy`
+- 공개 도메인: `k-skill-proxy.nomadamas.org` (Cloud Run domain mapping)
+- 컨테이너 이미지 정의: `packages/k-skill-proxy/Dockerfile`
+- 시크릿(upstream API key): GCP Secret Manager에 보관, Cloud Run runtime에 주입
 
-### 자동 배포 (cron)
+### 자동 배포 (GitHub Actions)
 
-`~/.local/share/k-skill-proxy/scripts/auto-update-proxy.sh`가 매시 정각에 실행된다.
+`main` 브랜치에 push/merge되면 `.github/workflows/deploy-k-skill-proxy.yml` 워크플로가 실행되어 다음 순서로 동작한다.
 
-```
-0 * * * * PATH=/usr/bin:/opt/homebrew/bin:/opt/homebrew/lib/node_modules/.bin:$PATH ~/.local/share/k-skill-proxy/scripts/auto-update-proxy.sh >> /tmp/k-skill-proxy-update.log 2>&1
-```
-
-동작 순서:
-
-1. `git fetch origin main`
-2. local SHA == remote SHA 이면 종료 (up-to-date)
-3. `git pull --ff-only`
-4. `package-lock.json` 변경 시 `npm ci`
-5. `pm2 restart k-skill-proxy --update-env`
+1. Workload Identity Federation으로 GCP 인증
+2. `packages/k-skill-proxy/Dockerfile`로 이미지 빌드
+3. Artifact Registry (`asia-northeast1-docker.pkg.dev/k-skill-proxy/k-skill/k-skill-proxy:<sha>`)에 push
+4. Cloud Run service `k-skill-proxy` 재배포 (Secret Manager 시크릿 + 런타임 환경변수 주입)
+5. 직접 Cloud Run URL과 `https://k-skill-proxy.nomadamas.org/health` smoke test
 
 따라서 **main에 merge되어야 프로덕션에 반영**된다. dev 브랜치 변경은 프로덕션에 영향 없음.
 
-로그: `/tmp/k-skill-proxy-update.log`
+배포 상태와 로그는 GitHub Actions의 "Deploy k-skill-proxy to Cloud Run" 워크플로 실행 페이지와 GCP Console의 Cloud Run revision/log에서 확인한다.
 
-### 초기 설정 (PM2 + cloudflared)
+### 초기 셋업 (운영자 1회 수행)
 
-1. `pm2 start ecosystem.config.cjs`
-2. `pm2 save`
-3. `pm2 startup` 출력대로 launchd 등록
-4. Cloudflare Tunnel ingress 에 `k-skill-proxy.nomadamas.org -> http://localhost:4020` 추가
+WIF pool/provider, deploy service account, Secret Manager 시크릿 생성 등 1회성 GCP 셋업 절차와 GitHub repository secrets/variables 등록 방법은 [`docs/deploy-k-skill-proxy.md`](../deploy-k-skill-proxy.md)에 정리되어 있다.
 
 ## 기본 공개 정책
 
