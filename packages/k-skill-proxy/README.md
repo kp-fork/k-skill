@@ -29,7 +29,7 @@
 - `GET /v1/kakao-map/search/category` — Kakao Local 카테고리 장소 검색(좌표 중심 필수, `KAKAO_REST_API_KEY`)
 - `GET /v1/kakao-map/coord2address` — Kakao Local 좌표→도로명/지번 주소(`KAKAO_REST_API_KEY`)
 - `GET /v1/kakao-map/coord2region` — Kakao Local 좌표→행정구역(`KAKAO_REST_API_KEY`)
-- `GET /v1/kakao-mobility/directions` — Kakao Mobility 자동차 길찾기(`KAKAO_REST_API_KEY`)
+- `GET /v1/kakao-mobility/directions` — Kakao Mobility 자동차 길찾기(`KAKAO_REST_API_KEY`; `avoid=toll|motorway` 등 회피 옵션 지원)
 - `GET /v1/kosis/search` — KOSIS 통계표 검색(`KOSIS_API_KEY`)
 - `GET /v1/kosis/meta` — KOSIS 통계표 메타데이터(`KOSIS_API_KEY`)
 - `GET /v1/kosis/data` — KOSIS 통계 데이터 셀 조회(`KOSIS_API_KEY`)
@@ -66,7 +66,7 @@
 - `KEDU_INFO_KEY` — 프록시 서버 쪽 나이스(NEIS) 교육정보 개방 포털 Open API 인증키 (`school-search`, `school-meal`)
 - `DATA4LIBRARY_AUTH_KEY` — 프록시 서버 쪽 도서관 정보나루 Open API 인증키 (`data4library/*`)
 - `FOODSAFETYKOREA_API_KEY` — 프록시 서버 쪽 식품안전나라 회수정보 live key (`mfds/food-safety/search`; 없으면 sample feed fallback)
-- `KAKAO_REST_API_KEY` — 프록시 서버 쪽 Kakao Local REST API 키 (`kakao-local/geocode`)
+- `KAKAO_REST_API_KEY` — 프록시 서버 쪽 Kakao REST API 키 (`kakao-local/geocode`, `kakao-map/*`, `kakao-mobility/directions`)
 - `KRX_API_KEY` — 프록시 서버 쪽 KRX Open API upstream key
 - `KOSIS_API_KEY` 또는 `KSKILL_KOSIS_API_KEY` — 프록시 서버 쪽 KOSIS Open API upstream key (`kosis/search`, `kosis/meta`, `kosis/data`)
 - `NAVER_SEARCH_CLIENT_ID`, `NAVER_SEARCH_CLIENT_SECRET` — 네이버 검색 Open API 키(`shop.json`, `news.json` 공통). 네이버 뉴스 route(`naver-news/search`)는 이 키가 **필수**이며 없으면 `503 upstream_not_configured` 를 돌려준다. 네이버 쇼핑 route(`naver-shopping/search`)는 **선택**이며 설정되면 공식 API 를 우선 사용하고, 없으면 공개 BFF JSON 파서로 fallback 한다. 공식 쇼핑 API 는 `review` 정렬을 지원하지 않아 `meta.sort_applied: "unsupported"`로 표시한다. no-key 쇼핑 fallback 은 `page`를 BFF에 전달해 해당 페이지를 고르고, `price_asc`/`price_dsc`/`review`는 선택 페이지 안에서 로컬 정렬하며, `date`는 `meta.sort_applied: "unsupported"`로 표시

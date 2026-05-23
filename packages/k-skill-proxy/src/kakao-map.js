@@ -26,6 +26,7 @@ const KAKAO_CATEGORY_GROUP_CODES = new Set([
 const KAKAO_MOBILITY_PRIORITY = new Set(["RECOMMEND", "TIME", "DISTANCE"]);
 const KAKAO_MOBILITY_CAR_FUEL = new Set(["GASOLINE", "DIESEL", "LPG"]);
 const KAKAO_MOBILITY_ROAD_DETAILS = new Set(["true", "false"]);
+const KAKAO_MOBILITY_AVOID = new Set(["ferries", "toll", "motorway", "schoolzone", "uturn"]);
 
 function trimOrNull(value) {
   if (value === undefined || value === null) {
@@ -127,6 +128,9 @@ function normalizeKakaoKeywordSearchQuery(query) {
   if (sort) {
     if (sort !== "distance" && sort !== "accuracy") {
       throw new Error("Provide sort as 'distance' or 'accuracy'.");
+    }
+    if (sort === "distance" && (!result.x || !result.y)) {
+      throw new Error("Provide both x (lng) and y (lat) when using sort=distance.");
     }
     result.sort = sort;
   }
@@ -286,6 +290,16 @@ function normalizeKakaoMobilityDirectionsQuery(query) {
     alternatives = lower === "true";
   }
 
+  const avoidRaw = trimOrNull(query.avoid);
+  let avoid = null;
+  if (avoidRaw) {
+    const values = avoidRaw.split("|").map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+    if (values.length === 0 || values.some((entry) => !KAKAO_MOBILITY_AVOID.has(entry))) {
+      throw new Error(`Provide avoid as pipe-separated values from ${[...KAKAO_MOBILITY_AVOID].join(", ")}.`);
+    }
+    avoid = values.join("|");
+  }
+
   return {
     origin: originRaw,
     destination: destinationRaw,
@@ -293,7 +307,8 @@ function normalizeKakaoMobilityDirectionsQuery(query) {
     priority,
     car_fuel: carFuel,
     car_hipass: carHipass,
-    alternatives
+    alternatives,
+    avoid
   };
 }
 
@@ -384,6 +399,7 @@ async function fetchKakaoMobilityDirections({
   car_fuel,
   car_hipass,
   alternatives,
+  avoid,
   apiKey,
   fetchImpl = global.fetch
 }) {
@@ -409,6 +425,9 @@ async function fetchKakaoMobilityDirections({
   }
   if (alternatives !== null && alternatives !== undefined) {
     url.searchParams.set("alternatives", String(alternatives));
+  }
+  if (avoid) {
+    url.searchParams.set("avoid", avoid);
   }
 
   let response;
@@ -475,6 +494,7 @@ module.exports = {
   KAKAO_CATEGORY_GROUP_CODES,
   KAKAO_MOBILITY_PRIORITY,
   KAKAO_MOBILITY_CAR_FUEL,
+  KAKAO_MOBILITY_AVOID,
   fetchKakaoLocalEndpoint,
   fetchKakaoMobilityDirections,
   normalizeKakaoKeywordSearchQuery,

@@ -784,6 +784,13 @@ test("Kakao Map keyword search validates coordinate pairing and radius bounds", 
     url: "/v1/kakao-map/search/keyword?q=hi&x=127.0&y=37.5&radius=99999"
   });
   assert.equal(badRadius.statusCode, 400);
+
+  const distanceSortWithoutCoords = await app.inject({
+    method: "GET",
+    url: "/v1/kakao-map/search/keyword?q=hi&sort=distance"
+  });
+  assert.equal(distanceSortWithoutCoords.statusCode, 400);
+  assert.match(distanceSortWithoutCoords.json().message, /sort=distance/i);
 });
 
 test("Kakao Map category search rejects unsupported category group codes", async (t) => {
@@ -837,6 +844,39 @@ test("Kakao Map category search routes to /search/category.json with FD6 and coo
   const parsed = new URL(calls[0].url);
   assert.equal(parsed.origin + parsed.pathname, "https://dapi.kakao.com/v2/local/search/category.json");
   assert.equal(parsed.searchParams.get("category_group_code"), "FD6");
+});
+
+test("Kakao Map coord2region routes to /geo/coord2regioncode.json with input_coord", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(
+      JSON.stringify({
+        meta: { total_count: 1 },
+        documents: [{ region_type: "B", address_name: "서울특별시 강남구 역삼동" }]
+      }),
+      { status: 200, headers: { "content-type": "application/json;charset=UTF-8" } }
+    );
+  };
+
+  const app = buildServer({
+    env: { KAKAO_REST_API_KEY: "k" }
+  });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/kakao-map/coord2region?x=127.0276&y=37.4979&input_coord=WGS84"
+  });
+  assert.equal(response.statusCode, 200);
+  assert.match(response.json().documents[0].address_name, /강남구/);
+  const parsed = new URL(calls[0]);
+  assert.equal(parsed.origin + parsed.pathname, "https://dapi.kakao.com/v2/local/geo/coord2regioncode.json");
+  assert.equal(parsed.searchParams.get("input_coord"), "WGS84");
 });
 
 test("Kakao Map coord2address routes to /geo/coord2address.json with x/y", async (t) => {
@@ -947,6 +987,35 @@ test("Kakao Mobility directions endpoint injects KakaoAK, forwards priority/opti
   assert.equal(calls[0].headers.authorization, "KakaoAK mob-key");
 });
 
+test("Kakao Mobility directions forwards whitelisted avoid options", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), headers: options.headers });
+    return new Response(
+      JSON.stringify({
+        trans_id: "avoid",
+        routes: [{ result_code: 0, result_msg: "성공", summary: { distance: 1000, duration: 300 } }]
+      }),
+      { status: 200, headers: { "content-type": "application/json;charset=UTF-8" } }
+    );
+  };
+
+  const app = buildServer({ env: { KAKAO_REST_API_KEY: "mob-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/kakao-mobility/directions?origin=126.9706,37.5559&destination=127.0276,37.4979&avoid=toll%7Cmotorway"
+  });
+  assert.equal(response.statusCode, 200);
+  const parsed = new URL(calls[0].url);
+  assert.equal(parsed.searchParams.get("avoid"), "toll|motorway");
+});
+
 test("Kakao Mobility directions endpoint validates coordinate, priority, and waypoint count", async (t) => {
   const app = buildServer({ env: { KAKAO_REST_API_KEY: "k" } });
   t.after(async () => {
@@ -964,6 +1033,12 @@ test("Kakao Mobility directions endpoint validates coordinate, priority, and way
     url: "/v1/kakao-mobility/directions?origin=127.0,37.5&destination=127.1,37.6&priority=CHEAP"
   });
   assert.equal(badPriority.statusCode, 400);
+
+  const badAvoid = await app.inject({
+    method: "GET",
+    url: "/v1/kakao-mobility/directions?origin=127.0,37.5&destination=127.1,37.6&avoid=unpaved"
+  });
+  assert.equal(badAvoid.statusCode, 400);
 
   const tooManyWaypoints = await app.inject({
     method: "GET",

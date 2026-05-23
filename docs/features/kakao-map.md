@@ -27,7 +27,7 @@
 | `GET /v1/kakao-map/search/category` | `https://dapi.kakao.com/v2/local/search/category.json` | `category_group_code`, `x`, `y`, `radius`, `sort`, `page`, `size` |
 | `GET /v1/kakao-map/coord2address` | `https://dapi.kakao.com/v2/local/geo/coord2address.json` | `x`, `y`, `input_coord` |
 | `GET /v1/kakao-map/coord2region` | `https://dapi.kakao.com/v2/local/geo/coord2regioncode.json` | `x`, `y`, `input_coord` |
-| `GET /v1/kakao-mobility/directions` | `https://apis-navi.kakaomobility.com/v1/directions` | `origin=x,y`, `destination=x,y`, `waypoints`, `priority`(RECOMMEND\|TIME\|DISTANCE), `car_fuel`, `car_hipass`, `alternatives` |
+| `GET /v1/kakao-mobility/directions` | `https://apis-navi.kakaomobility.com/v1/directions` | `origin=x,y`, `destination=x,y`, `waypoints`, `priority`(RECOMMEND\|TIME\|DISTANCE), `car_fuel`, `car_hipass`, `alternatives`, `avoid`(ferries\|toll\|motorway\|schoolzone\|uturn; `\|` 구분) |
 
 ## 기본 흐름
 
@@ -65,7 +65,8 @@ curl -fsS --get "${BASE}/v1/kakao-map/coord2address" \
 curl -fsS --get "${BASE}/v1/kakao-mobility/directions" \
   --data-urlencode 'origin=126.9706,37.5559' \
   --data-urlencode 'destination=127.0276,37.4979' \
-  --data-urlencode 'priority=RECOMMEND'
+  --data-urlencode 'priority=RECOMMEND' \
+  --data-urlencode 'avoid=toll'
 ```
 
 응답 요약(예):
@@ -74,7 +75,7 @@ curl -fsS --get "${BASE}/v1/kakao-mobility/directions" \
 자동차 경로: (126.9706,37.5559) → (127.0276,37.4979)
 - 거리: 12.3km / 예상 소요시간: 25분
 - 통행료: 1,200원 / 예상 택시요금: 18,500원
-- 옵션: RECOMMEND
+- 옵션: RECOMMEND, avoid=toll
 ```
 
 ## fallback / 대체 흐름
@@ -90,6 +91,7 @@ curl -fsS --get "${BASE}/v1/kakao-mobility/directions" \
 - Kakao Mobility는 **자동차 전용**이다. 대중교통 길찾기는 [한국 대중교통 길찾기 가이드](korean-transit-route.md) 를 쓴다.
 - 카테고리 검색은 좌표 중심(`x`, `y`)이 필수다.
 - waypoints 는 최대 5개 (Kakao Mobility 정책).
+- 통행료 회피는 `avoid=toll`을 사용한다. `priority=DISTANCE`는 최단거리 우선순위일 뿐 통행료 회피와 동의어가 아니다.
 - Kakao Mobility 무료 일일 쿼터는 1,000건 수준이다. proxy cache + rate-limit이 보호 역할을 하지만, 대량 호출은 자제한다.
 - 본 스킬은 데이터 조회 전용이다. 예약·결제·자동 운전은 하지 않는다.
 - secret/token/.env 원문은 응답에 노출되지 않는다 (proxy가 키를 서버측에서만 주입).
