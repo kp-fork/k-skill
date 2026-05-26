@@ -9,6 +9,9 @@
 - `GET /v1/korea-weather/forecast`
 - `GET /v1/seoul-subway/arrival`
 - `GET /v1/seoul-density/citydata` — 서울 실시간 도시데이터(`citydata_ppltn`) 핫스팟 혼잡도/추정 인구(`SEOUL_OPEN_API_KEY`)
+- `GET /v1/seoul-bike/realtime` — 서울 따릉이 실시간 대여정보(`bikeList`, `SEOUL_OPEN_API_KEY`)
+- `GET /v1/seoul-bike/stations` — 서울 따릉이 대여소 마스터(`tbCycleStationInfo`, `SEOUL_OPEN_API_KEY`)
+- `GET /v1/seoul-bike/nearby` — 좌표 주변 따릉이 실시간 대여소 필터링(`SEOUL_OPEN_API_KEY`)
 - `GET /v1/han-river/water-level`
 - `GET /v1/household-waste/info` — 생활쓰레기 배출정보(`DATA_GO_KR_API_KEY`; `pageNo=1`, `numOfRows=100` 필수)
 - `GET /v1/parking-lots/search` — 전국주차장정보표준데이터 기반 근처 공영주차장 검색(`DATA_GO_KR_API_KEY`)
@@ -22,6 +25,14 @@
 - `GET /v1/korean-stock/base-info`
 - `GET /v1/korean-stock/trade-info`
 - `GET /v1/kakao-local/geocode` — Kakao Local 주소/장소명 지오코딩(`KAKAO_REST_API_KEY`; caller `apiKey` 무시)
+- `GET /v1/kakao-map/search/keyword` — Kakao Local 키워드 장소 검색(좌표 중심·반경·카테고리 필터 지원, `KAKAO_REST_API_KEY`)
+- `GET /v1/kakao-map/search/category` — Kakao Local 카테고리 장소 검색(좌표 중심 필수, `KAKAO_REST_API_KEY`)
+- `GET /v1/kakao-map/coord2address` — Kakao Local 좌표→도로명/지번 주소(`KAKAO_REST_API_KEY`)
+- `GET /v1/kakao-map/coord2region` — Kakao Local 좌표→행정구역(`KAKAO_REST_API_KEY`)
+- `GET /v1/kakao-mobility/directions` — Kakao Mobility 자동차 길찾기(`KAKAO_REST_API_KEY`; `avoid=toll|motorway` 등 회피 옵션 지원)
+- `GET /v1/naver-map/directions` — NCP Maps Directions 5 자동차 길찾기(`NAVER_MAP_CLIENT_ID`, `NAVER_MAP_CLIENT_SECRET`)
+- `GET /v1/naver-map/geocode` — NCP Maps 주소→좌표 지오코딩(`NAVER_MAP_CLIENT_ID`, `NAVER_MAP_CLIENT_SECRET`)
+- `GET /v1/naver-map/reverse-geocode` — NCP Maps 좌표→주소 역지오코딩(`NAVER_MAP_CLIENT_ID`, `NAVER_MAP_CLIENT_SECRET`)
 - `GET /v1/kosis/search` — KOSIS 통계표 검색(`KOSIS_API_KEY`)
 - `GET /v1/kosis/meta` — KOSIS 통계표 메타데이터(`KOSIS_API_KEY`)
 - `GET /v1/kosis/data` — KOSIS 통계 데이터 셀 조회(`KOSIS_API_KEY`)
@@ -58,10 +69,11 @@
 - `KEDU_INFO_KEY` — 프록시 서버 쪽 나이스(NEIS) 교육정보 개방 포털 Open API 인증키 (`school-search`, `school-meal`)
 - `DATA4LIBRARY_AUTH_KEY` — 프록시 서버 쪽 도서관 정보나루 Open API 인증키 (`data4library/*`)
 - `FOODSAFETYKOREA_API_KEY` — 프록시 서버 쪽 식품안전나라 회수정보 live key (`mfds/food-safety/search`; 없으면 sample feed fallback)
-- `KAKAO_REST_API_KEY` — 프록시 서버 쪽 Kakao Local REST API 키 (`kakao-local/geocode`)
+- `KAKAO_REST_API_KEY` — 프록시 서버 쪽 Kakao REST API 키 (`kakao-local/geocode`, `kakao-map/*`, `kakao-mobility/directions`)
 - `KRX_API_KEY` — 프록시 서버 쪽 KRX Open API upstream key
 - `KOSIS_API_KEY` 또는 `KSKILL_KOSIS_API_KEY` — 프록시 서버 쪽 KOSIS Open API upstream key (`kosis/search`, `kosis/meta`, `kosis/data`)
 - `NAVER_SEARCH_CLIENT_ID`, `NAVER_SEARCH_CLIENT_SECRET` — 네이버 검색 Open API 키(`shop.json`, `news.json` 공통). 네이버 뉴스 route(`naver-news/search`)는 이 키가 **필수**이며 없으면 `503 upstream_not_configured` 를 돌려준다. 네이버 쇼핑 route(`naver-shopping/search`)는 **선택**이며 설정되면 공식 API 를 우선 사용하고, 없으면 공개 BFF JSON 파서로 fallback 한다. 공식 쇼핑 API 는 `review` 정렬을 지원하지 않아 `meta.sort_applied: "unsupported"`로 표시한다. no-key 쇼핑 fallback 은 `page`를 BFF에 전달해 해당 페이지를 고르고, `price_asc`/`price_dsc`/`review`는 선택 페이지 안에서 로컬 정렬하며, `date`는 `meta.sort_applied: "unsupported"`로 표시
+- `NAVER_MAP_CLIENT_ID`, `NAVER_MAP_CLIENT_SECRET` — NAVER Cloud Platform Maps subaccount 키. `naver-map/*` 라우트의 **운영 가능 여부**를 결정한다. 키가 없으면 라우트는 `503 upstream_not_configured` 를 돌려준다.
 - `KSKILL_PROXY_HOST` — 기본 `127.0.0.1`
 - `KSKILL_PROXY_PORT` — 기본 `4020`
 - `KSKILL_PROXY_CACHE_TTL_MS` — 기본 `300000`
@@ -100,6 +112,12 @@ curl -fsS --get 'http://127.0.0.1:4020/v1/seoul-subway/arrival' \
 ```bash
 curl -fsS --get 'http://127.0.0.1:4020/v1/seoul-density/citydata' \
   --data-urlencode 'area=강남역'
+
+# Seoul Bike nearby stations
+curl -fsS --get 'http://127.0.0.1:4020/v1/seoul-bike/nearby' \
+  --data-urlencode 'lat=37.5717' \
+  --data-urlencode 'lon=126.9763' \
+  --data-urlencode 'radius_m=500'
 ```
 
 한국 날씨 예시:
