@@ -4,6 +4,7 @@ import unittest
 import sys
 import os
 from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta
 
 # 현재 디렉토리에서 모듈 임포트
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,6 +15,8 @@ class TestStartupSupport(unittest.TestCase):
     
     def setUp(self):
         """테스트 초기화"""
+        soon_deadline = (datetime.now() + timedelta(days=5)).strftime('%Y-%m-%d')
+        later_deadline = (datetime.now() + timedelta(days=10)).strftime('%Y-%m-%d')
         self.test_programs = [
             {
                 'id': 'test_001',
@@ -22,7 +25,7 @@ class TestStartupSupport(unittest.TestCase):
                 'region': '서울특별시',
                 'support_type': '보조금',
                 'amount': '최대 5천만원',
-                'deadline': '2024-12-31',
+                'deadline': later_deadline,
                 'target': '만 19~34세 청년 창업가',
                 'contact': '02-1234-5678',
                 'url': 'https://seoulstartup.go.kr/program/001',
@@ -36,7 +39,7 @@ class TestStartupSupport(unittest.TestCase):
                 'region': '경기도',
                 'support_type': '보조금',
                 'amount': '최대 3천만원',
-                'deadline': '2024-11-30',
+                'deadline': soon_deadline,
                 'target': 'MVP 개발 스타트업',
                 'contact': '031-1234-5678',
                 'url': 'https://g-startup.kr/program/002',
@@ -58,8 +61,8 @@ class TestStartupSupport(unittest.TestCase):
         
         # 결과 확인
         self.assertEqual(len(result), 2)
-        self.assertEqual(result[0]['title'], '서울시 청년 스타트업 창업 지원금')
-        self.assertEqual(result[1]['title'], '경기도 MVP 지원사업')
+        self.assertEqual(result[0]['title'], '경기도 MVP 지원사업')
+        self.assertEqual(result[1]['title'], '서울시 청년 스타트업 창업 지원금')
     
     @patch('startup_support.StartupSupportAPI._search_data_go_kr')
     @patch('startup_support.StartupSupportAPI._search_by_region')
@@ -101,11 +104,12 @@ class TestStartupSupport(unittest.TestCase):
         
         # 검색 실행
         result = search_startup_support(deadline_only=True)
-        
-        # 결과 확인 (마감 임박 프로그램만)
-        self.assertEqual(len(result), 2)  # 모두 마감 임박
+
+        # 결과 확인 (7일 이내 마감만)
+        self.assertEqual(len(result), 1)
         for program in result:
-            self.assertIn(program['deadline'], ['2024-12-31', '2024-11-30'])
+            deadline = datetime.strptime(program['deadline'], '%Y-%m-%d')
+            self.assertTrue(datetime.now() <= deadline <= datetime.now() + timedelta(days=7))
     
     @patch('startup_support.StartupSupportAPI._get_data_go_kr_detail')
     def test_get_program_detail_data_gov(self, mock_get_detail):
@@ -209,8 +213,8 @@ class TestStartupSupport(unittest.TestCase):
         # 필터링 실행
         result = api._filter_upcoming_deadline(programs)
         
-        # 결과 확인 (7일 이내만)
-        self.assertEqual(len(result), 2)
+        # 결과 확인 (7일 이내이면서 이미 지난 날짜 제외)
+        self.assertEqual(len(result), 1)
     
     def test_remove_duplicates(self):
         """중복 제거 테스트"""

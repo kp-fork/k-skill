@@ -229,7 +229,7 @@ class StartupSupportAPI:
             if program['deadline']:
                 try:
                     deadline = datetime.strptime(program['deadline'], '%Y-%m-%d')
-                    if deadline <= upcoming_threshold:
+                    if today <= deadline <= upcoming_threshold:
                         filtered.append(program)
                 except:
                     # 날짜 파싱 실패 시 제외
