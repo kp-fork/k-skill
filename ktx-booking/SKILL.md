@@ -141,7 +141,7 @@ python3 scripts/ktx_booking.py seats 서울 부산 20260328 090000 --train-id <t
 python3 scripts/ktx_booking.py seats 서울 부산 20260328 090000 --train-id <train_id> --car-no 5 --available-only
 ```
 
-콘센트 꿀팁 자리부터 확인하려면 `--power-only` 를 붙인다. 응답의 `power_outlet` 은 `direct`, `adjacent`, `none` 중 하나다.
+콘센트 꿀팁 자리부터 확인하려면 `--power-only` 를 붙인다. 응답의 `power_outlet` 은 `direct`, `adjacent`, `none` 중 하나다. 이 필터는 KTX/KTX-산천에서 알려진 호차 배치 힌트 기반 best-effort 이다.
 
 ```bash
 python3 scripts/ktx_booking.py seats 서울 부산 20260328 090000 --train-id <train_id> --available-only --power-only

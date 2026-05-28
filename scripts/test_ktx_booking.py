@@ -327,6 +327,10 @@ class KtxBookingTests(unittest.TestCase):
         self.assertFalse(ktx_booking.is_phone_login_id("1234567890"))
         self.assertFalse(ktx_booking.is_phone_login_id("user@example.com"))
 
+    def test_seat_lookup_urls_receive_dynapath_headers(self):
+        self.assertTrue(any(path in ktx_booking.KORAIL_CARS_INFO for path in ktx_booking.DYNAPATH_PATHS))
+        self.assertTrue(any(path in ktx_booking.KORAIL_CAR_DETAIL for path in ktx_booking.DYNAPATH_PATHS))
+
     def test_command_search_replays_selected_train_type(self):
         selected = FakeTrain(
             train_no="2080",
@@ -597,6 +601,43 @@ class KtxBookingTests(unittest.TestCase):
                     ktx_booking.command_seats(args)
 
         self.assertIn("car_no 5", str(exc.exception))
+
+    def test_command_seats_treats_malformed_seat_infos_as_empty(self):
+        selected = FakeTrain(train_no="009", dep_time="090000", arr_time="113000", label="selected")
+        raw_train = {"h_trn_no": "009", "h_dpt_dt": "20260328"}
+        train_id = ktx_booking.normalize_train(selected, index=1)["train_id"]
+        client = FakeClient(
+            [],
+            train_details=[(selected, raw_train)],
+            cars=[{"h_srcar_no": "05", "h_psrm_cl_cd": "1", "h_seat_cnt": "48", "h_rest_seat_cnt": "9"}],
+        )
+        client.car_seats = lambda *args, **kwargs: {"seat_infos": []}
+        args = argparse.Namespace(
+            dep="서울",
+            arr="부산",
+            date="20260328",
+            time="090000",
+            adults=1,
+            children=0,
+            toddlers=0,
+            seniors=0,
+            train_id=train_id,
+            room="general",
+            train_type="ktx",
+            car_no=None,
+            available_only=True,
+            power_only=False,
+            limit=10,
+        )
+        output = io.StringIO()
+
+        with patch.object(ktx_booking, "build_client", return_value=client):
+            with redirect_stdout(output):
+                ktx_booking.command_seats(args)
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["cars"][0]["available_seat_count"], 0)
+        self.assertEqual(result["cars"][0]["seats"], [])
 
     def test_build_parser_has_ncard_commands(self):
         parser = ktx_booking.build_parser()

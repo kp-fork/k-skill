@@ -103,7 +103,7 @@ except ModuleNotFoundError as exc:
 
     class _FallbackKorailModule:
         EMAIL_REGEX = re.compile(r".+@.+")
-        PHONE_NUMBER_REGEX = re.compile(r"^\d+$")
+        PHONE_NUMBER_REGEX = re.compile(r"^01\d-?\d{3,4}-?\d{4}$")
 
     korail_mod = _FallbackKorailModule()
 else:
@@ -127,6 +127,8 @@ DEFAULT_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 13; SM-S928N Build/UP1A.23
 DYNAPATH_PATHS = [
     "/classes/com.korail.mobile.certification.TicketReservation",
     "/classes/com.korail.mobile.nonMember.NonMemTicket",
+    "/classes/com.korail.mobile.research.ResidualSeatsResearch.do",
+    "/classes/com.korail.mobile.research.TrainResearch",
     "/classes/com.korail.mobile.seatMovie.ScheduleView",
     "/classes/com.korail.mobile.seatMovie.ScheduleViewSpecial",
     "/classes/com.korail.mobile.trn.prcFare.do",
@@ -899,10 +901,15 @@ def command_seats(args: argparse.Namespace) -> None:
     car_payloads: list[dict[str, object]] = []
     for car in cars:
         raw = client.car_seats(raw_train, str(car["car_no_raw"]), passenger_count, room_class)
-        raw_seats = raw.get("seat_infos", {}).get("seat_info", [])
+        seat_infos = raw.get("seat_infos", {}) if isinstance(raw, dict) else {}
+        raw_seats = seat_infos.get("seat_info", []) if isinstance(seat_infos, dict) else []
         if isinstance(raw_seats, dict):
             raw_seats = [raw_seats]
-        all_seats = [normalize_seat(seat) for seat in raw_seats if seat.get("h_con_seat_no") != "0A"]
+        all_seats = [
+            normalize_seat(seat)
+            for seat in raw_seats
+            if isinstance(seat, dict) and seat.get("h_con_seat_no") != "0A"
+        ]
         available_seats = [seat for seat in all_seats if seat["available"]]
         seats = all_seats
         if args.available_only:

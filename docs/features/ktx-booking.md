@@ -97,7 +97,7 @@ python3 scripts/ktx_booking.py seats 서울 부산 20260328 090000 --train-id <t
 python3 scripts/ktx_booking.py seats 서울 부산 20260328 090000 --train-id <train_id> --available-only --power-only
 ```
 
-특실 좌석을 확인하려면 `--room special`, KTX 외 열차를 조회했다면 `search` 와 같은 `--train-type` 을 함께 넘긴다.
+`--power-only` 는 KTX/KTX-산천에서 알려진 호차 배치 힌트 기반의 best-effort 필터다. 특실 좌석을 확인하려면 `--room special`, KTX 외 열차를 조회했다면 `search` 와 같은 `--train-type` 을 함께 넘긴다.
 
 ```bash
 python3 scripts/ktx_booking.py seats 남춘천 용산 20260503 150000 \
