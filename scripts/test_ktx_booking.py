@@ -321,6 +321,34 @@ class KtxBookingTests(unittest.TestCase):
         self.assertEqual(ktx_booking.power_outlet_match("2A"), "none")
         self.assertEqual(ktx_booking.power_outlet_match("bad"), "none")
 
+    def test_booking_priority_sorts_middle_cars_before_end_cars(self):
+        cars = [
+            {"car_no": 1},
+            {"car_no": 8},
+            {"car_no": 2},
+            {"car_no": 7},
+            {"car_no": 3},
+            {"car_no": 6},
+            {"car_no": 4},
+            {"car_no": 5},
+        ]
+
+        sorted_cars = ktx_booking.sort_cars_for_booking(cars)
+
+        self.assertEqual([car["car_no"] for car in sorted_cars], [4, 5, 3, 6, 2, 7, 1, 8])
+
+    def test_booking_priority_sorts_power_outlet_before_forward_direction(self):
+        seats = [
+            {"seat": "2A", "power_outlet": "none", "direction": "순방향"},
+            {"seat": "1C", "power_outlet": "adjacent", "direction": "역방향"},
+            {"seat": "1A", "power_outlet": "direct", "direction": "역방향"},
+            {"seat": "3A", "power_outlet": "direct", "direction": "순방향"},
+        ]
+
+        sorted_seats = ktx_booking.sort_seats_for_booking(seats)
+
+        self.assertEqual([seat["seat"] for seat in sorted_seats], ["3A", "1A", "1C", "2A"])
+
     def test_is_phone_login_id_accepts_digits_only_mobile_numbers(self):
         self.assertTrue(ktx_booking.is_phone_login_id("01012345678"))
         self.assertTrue(ktx_booking.is_phone_login_id("0101234567"))
@@ -530,6 +558,120 @@ class KtxBookingTests(unittest.TestCase):
         self.assertEqual(client.train_car_calls[-1]["passenger_count"], 3)
         self.assertEqual(client.train_car_calls[-1]["room_class"], "1")
         self.assertEqual(client.car_seat_calls[-1]["car_no"], "05")
+
+    def test_command_seats_explores_middle_cars_first(self):
+        selected = FakeTrain(train_no="009", dep_time="090000", arr_time="113000", label="selected")
+        raw_train = {"h_trn_no": "009", "h_dpt_dt": "20260328"}
+        train_id = ktx_booking.normalize_train(selected, index=1)["train_id"]
+        client = FakeClient(
+            [],
+            train_details=[(selected, raw_train)],
+            cars=[
+                {"h_srcar_no": "01", "h_psrm_cl_cd": "1", "h_seat_cnt": "48", "h_rest_seat_cnt": "1"},
+                {"h_srcar_no": "08", "h_psrm_cl_cd": "1", "h_seat_cnt": "48", "h_rest_seat_cnt": "1"},
+                {"h_srcar_no": "04", "h_psrm_cl_cd": "1", "h_seat_cnt": "48", "h_rest_seat_cnt": "1"},
+                {"h_srcar_no": "05", "h_psrm_cl_cd": "1", "h_seat_cnt": "48", "h_rest_seat_cnt": "1"},
+            ],
+        )
+        args = argparse.Namespace(
+            dep="서울",
+            arr="부산",
+            date="20260328",
+            time="090000",
+            adults=1,
+            children=0,
+            toddlers=0,
+            seniors=0,
+            train_id=train_id,
+            room="general",
+            train_type="ktx",
+            car_no=None,
+            available_only=False,
+            power_only=False,
+            limit=10,
+        )
+        output = io.StringIO()
+
+        with patch.object(ktx_booking, "build_client", return_value=client):
+            with redirect_stdout(output):
+                ktx_booking.command_seats(args)
+
+        result = json.loads(output.getvalue())
+        self.assertEqual([car["car_no"] for car in result["cars"]], [4, 5, 1, 8])
+        self.assertEqual([call["car_no"] for call in client.car_seat_calls], ["04", "05", "01", "08"])
+
+    def test_command_seats_outputs_available_seats_by_booking_preference(self):
+        selected = FakeTrain(train_no="009", dep_time="090000", arr_time="113000", label="selected")
+        raw_train = {"h_trn_no": "009", "h_dpt_dt": "20260328"}
+        train_id = ktx_booking.normalize_train(selected, index=1)["train_id"]
+        client = FakeClient(
+            [],
+            train_details=[(selected, raw_train)],
+            cars=[{"h_srcar_no": "05", "h_psrm_cl_cd": "1", "h_seat_cnt": "48", "h_rest_seat_cnt": "4"}],
+            seats_by_car={
+                "05": [
+                    {
+                        "h_con_seat_no": "2A",
+                        "h_seat_no": "002001",
+                        "h_sale_psb_flg": "Y",
+                        "h_for_rev_dir_dv": "009",
+                        "h_sigl_win_in_dv": "012",
+                        "h_dmd_seat_att": "015",
+                    },
+                    {
+                        "h_con_seat_no": "1C",
+                        "h_seat_no": "001003",
+                        "h_sale_psb_flg": "Y",
+                        "h_for_rev_dir_dv": "010",
+                        "h_sigl_win_in_dv": "013",
+                        "h_dmd_seat_att": "015",
+                    },
+                    {
+                        "h_con_seat_no": "1A",
+                        "h_seat_no": "001001",
+                        "h_sale_psb_flg": "Y",
+                        "h_for_rev_dir_dv": "010",
+                        "h_sigl_win_in_dv": "012",
+                        "h_dmd_seat_att": "015",
+                    },
+                    {
+                        "h_con_seat_no": "3A",
+                        "h_seat_no": "003001",
+                        "h_sale_psb_flg": "Y",
+                        "h_for_rev_dir_dv": "009",
+                        "h_sigl_win_in_dv": "012",
+                        "h_dmd_seat_att": "015",
+                    },
+                ],
+            },
+        )
+        args = argparse.Namespace(
+            dep="서울",
+            arr="부산",
+            date="20260328",
+            time="090000",
+            adults=1,
+            children=0,
+            toddlers=0,
+            seniors=0,
+            train_id=train_id,
+            room="general",
+            train_type="ktx",
+            car_no=None,
+            available_only=True,
+            power_only=False,
+            limit=10,
+        )
+        output = io.StringIO()
+
+        with patch.object(ktx_booking, "build_client", return_value=client):
+            with redirect_stdout(output):
+                ktx_booking.command_seats(args)
+
+        result = json.loads(output.getvalue())
+        car = result["cars"][0]
+        self.assertEqual(car["available_seats"], ["3A", "1A", "1C", "2A"])
+        self.assertEqual([seat["seat"] for seat in car["seats"]], ["3A", "1A", "1C", "2A"])
 
     def test_command_seats_supports_special_room_and_stale_train_error(self):
         selected = FakeTrain(train_no="009", dep_time="090000", arr_time="113000", label="selected")

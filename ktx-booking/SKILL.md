@@ -135,6 +135,8 @@ python3 scripts/ktx_booking.py seats 서울 부산 20260328 090000 --train-id <t
 python3 scripts/ktx_booking.py seats 서울 부산 20260328 090000 --train-id <train_id> --available-only
 ```
 
+특정 호차를 지정하지 않으면 `seats` 는 승강장 이동 거리가 짧은 가운데 호차부터 탐색한다. 각 호차 안의 좌석은 콘센트 힌트가 있는 좌석(`direct`, `adjacent`)을 먼저, 같은 조건에서는 순방향 좌석을 먼저 보여준다.
+
 특정 호차만 확인하려면 `--car-no` 를 쓴다.
 
 ```bash

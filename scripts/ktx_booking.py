@@ -103,7 +103,7 @@ except ModuleNotFoundError as exc:
 
     class _FallbackKorailModule:
         EMAIL_REGEX = re.compile(r".+@.+")
-        PHONE_NUMBER_REGEX = re.compile(r"^\d+$")
+        PHONE_NUMBER_REGEX = re.compile(r"(\d{3})-(\d{3,4})-(\d{4})")
 
     korail_mod = _FallbackKorailModule()
 else:
@@ -200,7 +200,7 @@ POWER_OUTLET_ADJACENT_COLUMNS = {"B", "C"}
 
 
 def is_phone_login_id(korail_id: str) -> bool:
-    return bool(korail_mod.PHONE_NUMBER_REGEX.match(korail_id) or PHONE_NUMBER_DIGITS_REGEX.match(korail_id))
+    return bool(korail_mod.PHONE_NUMBER_REGEX.fullmatch(korail_id) or PHONE_NUMBER_DIGITS_REGEX.fullmatch(korail_id))
 
 
 def ensure_runtime_dependencies() -> None:
@@ -799,6 +799,30 @@ def normalize_car(raw_car: dict[str, object]) -> dict[str, object]:
     }
 
 
+def car_center_priority(car: dict[str, object], car_numbers: list[int]) -> tuple[float, int]:
+    car_no = int(car["car_no"])
+    if not car_numbers:
+        return (0.0, car_no)
+    center = (min(car_numbers) + max(car_numbers)) / 2
+    return (abs(car_no - center), car_no)
+
+
+def sort_cars_for_booking(cars: list[dict[str, object]]) -> list[dict[str, object]]:
+    car_numbers = [int(car["car_no"]) for car in cars]
+    return sorted(cars, key=lambda car: car_center_priority(car, car_numbers))
+
+
+def seat_preference_key(seat: dict[str, object]) -> tuple[int, int, int, str]:
+    power_rank = {"direct": 0, "adjacent": 1, "none": 2}.get(str(seat.get("power_outlet")), 2)
+    direction_rank = 0 if seat.get("direction") == "순방향" else 1
+    row, column = parse_seat_label(str(seat.get("seat", "")))
+    return (power_rank, direction_rank, row if row is not None else 999, column)
+
+
+def sort_seats_for_booking(seats: list[dict[str, object]]) -> list[dict[str, object]]:
+    return sorted(seats, key=seat_preference_key)
+
+
 def mask_identifier(value: object, visible: int = 4) -> str:
     text = str(value or "")
     if not text:
@@ -895,6 +919,8 @@ def command_seats(args: argparse.Namespace) -> None:
         cars = [car for car in cars if car["car_no"] == args.car_no]
         if not cars:
             raise SystemExit(f"car_no {args.car_no} is not available for {args.room}")
+    else:
+        cars = sort_cars_for_booking(cars)
 
     car_payloads: list[dict[str, object]] = []
     for car in cars:
@@ -903,8 +929,8 @@ def command_seats(args: argparse.Namespace) -> None:
         if isinstance(raw_seats, dict):
             raw_seats = [raw_seats]
         all_seats = [normalize_seat(seat) for seat in raw_seats if seat.get("h_con_seat_no") != "0A"]
-        available_seats = [seat for seat in all_seats if seat["available"]]
-        seats = all_seats
+        available_seats = sort_seats_for_booking([seat for seat in all_seats if seat["available"]])
+        seats = sort_seats_for_booking(all_seats)
         if args.available_only:
             seats = available_seats
         if args.power_only:
