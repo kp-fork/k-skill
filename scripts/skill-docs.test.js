@@ -386,6 +386,25 @@ test("lck-analytics docs and skill credit the original author and reference repo
   assert.match(sources, /https:\/\/github\.com\/jerjangmin\/share\/tree\/main\/SKILL\/lck-analytics/);
 });
 
+test("repository docs advertise the korean-humanizer skill and credit im-not-ai and happy-nut", () => {
+  const readme = read("README.md");
+  const skill = read(path.join("korean-humanizer", "SKILL.md"));
+  const featureDoc = read(path.join("docs", "features", "korean-humanizer.md"));
+  const taxonomy = read(path.join("korean-humanizer", "references", "ai-tell-taxonomy.md"));
+
+  assert.match(readme, /\| 한국어 AI 윤문 \| `korean-humanizer` \|/);
+  assert.match(readme, /\[한국어 AI 윤문 가이드\]\(docs\/features\/korean-humanizer\.md\)/);
+
+  for (const doc of [skill, featureDoc, taxonomy]) {
+    assert.match(doc, /https:\/\/github\.com\/epoko77-ai\/im-not-ai/);
+  }
+  for (const doc of [skill, featureDoc]) {
+    assert.match(doc, /happy-nut/);
+  }
+  assert.match(skill, /S1|S2|S3/);
+  assert.match(skill, /references\/ai-tell-taxonomy\.md/);
+});
+
 test("repository docs advertise the korean-spell-check skill and usage constraints", () => {
   const readme = read("README.md");
   const install = read(path.join("docs", "install.md"));
