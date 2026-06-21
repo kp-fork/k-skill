@@ -94,8 +94,8 @@
 - LH 임대공고문 상세(공급정보) endpoint: http://apis.data.go.kr/B552555/lhLeaseNoticeDtlInfo1/getLeaseNoticeDtlInfo1
 - LH 청약 샘플 reference 구현(heereal/Bunyang_MoeumZip): https://github.com/heereal/Bunyang_MoeumZip
 - 법제처 국가법령정보 공동활용 Open API (k-skill-proxy `/v1/korean-law/*` upstream): https://open.law.go.kr — DRF `lawSearch.do` (검색) / `lawService.do` (본문)
-- `silver-flight-group/kakaocli`: https://github.com/silver-flight-group/kakaocli
-- KakaoTalk Mac 설치 참고(`mas`): https://velog.io/@bonjugi/%EB%A7%A5%EB%B6%81-M1%EC%97%90-homebrew%EB%A1%9C-node-vscode-%EC%B9%B4%EC%B9%B4%EC%98%A4%ED%86%A1-%EC%84%A4%EC%B9%98%ED%95%98%EA%B8%B0
+- `NomaDamas/katok`: https://github.com/NomaDamas/katok
+- `katok` macOS first-run docs: https://github.com/NomaDamas/katok/blob/main/docs/macos-first-run.md
 - 동행복권 로또 결과 페이지: https://www.dhlottery.co.kr/lt645/result
 - 동행복권 지난 회차 JSON 표면: https://www.dhlottery.co.kr/lt645/selectPstLt645InfoNew.do
 - 바른한글 메인: https://nara-speller.co.kr/speller/
@@ -232,3 +232,5 @@
 - 국세청 고액·상습체납자 명단공개(무인증): https://www.nts.go.kr/nts/ad/openInfo/selectList.do
 - 지방행정 인허가데이터 LOCALDATA 파일 다운로드(무인증, CP949 CSV): https://file.localdata.go.kr/file/download/<업종slug>/info?orgCode=<지자체코드>
 - LOCALDATA 본체: https://www.localdata.go.kr
+- 잡코리아 기업 인재검색: https://www.jobkorea.co.kr/corp/person/find — 기업회원 로그인 세션에서 마스킹 이력서/목록을 읽는 브라우저 기반 경로. 유료 열람/마스킹 해제/포지션 제안은 수동 확인 대상.
+- 사람인 기업회원 인재풀 검색: https://www.saramin.co.kr/zf_user/memcom/talent-pool/main/search — 기업회원 로그인 및 첫 기기 2차 인증 후 현재 보이는 마스킹 후보 정보를 읽는 브라우저 기반 경로. 유료 열람/연락처 확인/제안 발송은 수동 확인 대상.
