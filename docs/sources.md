@@ -118,6 +118,12 @@
 - 다이소몰 매장 픽업 재고: https://www.daisomall.co.kr/api/pd/pdh/selStrPkupStck (Authorization: Bearer 헤더 필요)
 - 다이소몰 매장 픽업 가능 여부 fallback: https://www.daisomall.co.kr/api/ms/msg/selPkupStr (Bearer 재고 조회가 401/403으로 계속 막힐 때 `pickupEligibility` 보조 정보로 사용)
 - 다이소몰 온라인 재고: https://www.daisomall.co.kr/api/pdo/selOnlStck
+- 러브버그.com 지도: https://xn--2i0bt2q2wd1wb.com/
+- 러브버그.com 구별 점수 JSON: https://xn--2i0bt2q2wd1wb.com/api/map/gu-score
+- 러브버그.com 주간 제보 수 JSON: https://xn--2i0bt2q2wd1wb.com/api/map/weekly-report-count
+- 러브버그.com 클러스터 JSON: https://xn--2i0bt2q2wd1wb.com/api/map/clusters?level=sigungu&historicalYear=2026
+- 러브버그.com 동네 snapshot JSON: https://xn--2i0bt2q2wd1wb.com/api/map/areas?historicalYear=2026&includePolygon=false
+- 러브버그.com 익명 제보 RPC: https://sewrbxfawkmusnyzjoab.supabase.co/rest/v1/rpc/submit_anonymous_report (public anon key, `p_gu_code`, `p_lng`, `p_lat`, `p_accuracy_m`, `p_level`, `p_device_hash`, `p_context`, `p_image_url`, `p_indoor` body)
 - 강남언니 공개 검색: https://www.gangnamunni.com/search?q=<keyword>
 - 강남언니 공개 병원 페이지: https://www.gangnamunni.com/hospitals/<id>
 - 마켓컬리 검색 API(v4): https://api.kurly.com/search/v4/sites/market/normal-search
@@ -154,7 +160,8 @@
 - 당근 메인: https://www.daangn.com/
 - 당근 지역 검색 API: https://www.daangn.com/kr/api/v1/regions/keyword?keyword=<지역명>
 - 당근 중고거래 검색 Remix data route: https://www.daangn.com/kr/buy-sell/all/?_data=routes/kr.buy-sell._index
-- 당근부동산 검색 Remix data route: https://www.daangn.com/kr/realty/?_data=routes/kr.realty._index
+- 당근부동산 검색 지도 페이지: https://realty.daangn.com/map/{name1}/{name2}/{name3} — SSR `window.RELAY_STORE`에서 매물 후보를 읽는다.
+- 당근부동산 폐기된 Remix data route: https://www.daangn.com/kr/realty/?_data=routes/kr.realty._index — 2026-06 기준 HTTP 204 빈 응답, 사용 금지.
 - 당근알바 검색 Remix data route: https://www.daangn.com/kr/jobs/?_data=routes/kr.jobs._index
 - 당근중고차 검색 Remix data route: https://www.daangn.com/kr/cars/?_data=routes/kr.cars._index
 - 당근부동산 상세 페이지: https://realty.daangn.com/articles/<id>
