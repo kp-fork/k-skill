@@ -79,6 +79,8 @@
 - KRX OPEN API 메인: https://openapi.krx.co.kr/contents/OPP/MAIN/main/index.cmd
 - KRX 종목 기본정보 API (KOSPI): http://data-dbg.krx.co.kr/svc/apis/sto/stk_isu_base_info
 - KRX 일별 매매정보 API (KOSPI): http://data-dbg.krx.co.kr/svc/apis/sto/stk_bydd_trd
+- 잡코리아 공개 채용공고 검색: https://www.jobkorea.co.kr/Search/?stext=<검색어> — `job-posting-match`가 로그인 없이 `/Recruit/GI_Read/<id>` 링크가 포함된 공개 결과를 직접 조회한다.
+- 사람인 공개 채용공고 검색: https://www.saramin.co.kr/zf_user/search/recruit?searchword=<검색어> — `job-posting-match`가 로그인 없이 `rec_idx`가 포함된 공개 결과를 직접 조회한다.
 - MOLIT 아파트 매매 실거래가 API: https://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade
 - MOLIT 아파트 전월세 API: https://apis.data.go.kr/1613000/RTMSDataSvcAptRent/getRTMSDataSvcAptRent
 - MOLIT 오피스텔 매매 API: https://apis.data.go.kr/1613000/RTMSDataSvcOffiTrade/getRTMSDataSvcOffiTrade
