@@ -230,6 +230,47 @@ test("report submission requires a caller-provided stable device hash", async ()
     /deviceHash is required/
   )
 })
+test("caller-provided device hash stays stable across coordinate jitter", async () => {
+  for (const lng of [127.09, 127.0901]) {
+    const request = buildSubmitAnonymousReportRequest({
+      guCode: "11070",
+      lng,
+      lat: 37.59,
+      accuracyM: 25,
+      level: "많아요",
+      context: "길거리",
+      deviceHash: "stable-device-1"
+    })
+    assert.equal(JSON.parse(request.body).p_device_hash, "stable-device-1")
+  }
+
+  const snakeCaseRequest = buildSubmitAnonymousReportRequest({
+    gu_code: "11070",
+    lng: 127.0902,
+    lat: 37.59,
+    accuracyM: 25,
+    level: "많아요",
+    context: "길거리",
+    device_hash: "stable-device-1"
+  })
+  assert.equal(JSON.parse(snakeCaseRequest.body).p_device_hash, "stable-device-1")
+
+  const requests = []
+  await reportLovebug({
+    guCode: "11070",
+    level: "많아요",
+    context: "길거리",
+    lng: 127.0901,
+    lat: 37.59,
+    accuracyM: 25,
+    deviceHash: "stable-device-1",
+    fetch: async (url, init) => {
+      requests.push({ url: String(url), init })
+      return jsonResponse(null, { status: 204 })
+    }
+  })
+  assert.equal(JSON.parse(requests[0].init.body).p_device_hash, "stable-device-1")
+})
 
 test("reportLovebug submits anonymous reports and classifies official failure modes", async () => {
   const requests = []
