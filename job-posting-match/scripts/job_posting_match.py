@@ -76,6 +76,10 @@ def absolute_url(source: str, href: str) -> str:
     return urllib.parse.urljoin(base, href)
 
 
+def attribute_text(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
 def split_keywords(text: str) -> list[str]:
     found: list[str] = []
     lower = text.lower()
@@ -120,7 +124,7 @@ def parse_jobkorea(markup: str, limit: int) -> list[Posting]:
         soup = BeautifulSoup(markup, "html.parser")
         anchors = soup.find_all("a", href=re.compile(r"/Recruit/GI_Read/", re.I))
         for a in anchors:
-            url = absolute_url("jobkorea", a.get("href", ""))
+            url = absolute_url("jobkorea", attribute_text(a.get("href")))
             job_id = re.search(r"/Recruit/GI_Read/(\d+)", url)
             key = job_id.group(1) if job_id else url
             text = clean_text(a.get_text(" "))
@@ -168,12 +172,12 @@ def parse_saramin(markup: str, limit: int) -> list[Posting]:
             a = item.select_one('h2.job_tit a[href*="/zf_user/jobs/relay/view"], a[href*="rec_idx="]')
             if not a:
                 continue
-            url = absolute_url("saramin", a.get("href", ""))
+            url = absolute_url("saramin", attribute_text(a.get("href")))
             rec = re.search(r"rec_idx=(\d+)", url)
             key = rec.group(1) if rec else url
             if key in seen:
                 continue
-            title = clean_text(a.get("title") or a.get_text(" "))
+            title = clean_text(attribute_text(a.get("title")) or a.get_text(" "))
             company_el = item.select_one(".corp_name a, .corp_name, .company_nm a, .company_nm")
             condition = clean_text(" ".join(x.get_text(" ") for x in item.select(".job_condition span, .job_sector, .area, .career, .education")))
             deadline_el = item.select_one(".date, .deadlines, .support_detail .date")
@@ -230,6 +234,15 @@ def detect_career_years(text: str) -> int | None:
     return max(years) if years else None
 
 
+def negative_term_matches(term: str, haystack: str) -> bool:
+    normalized = term.strip().lower()
+    if not normalized:
+        return False
+    if re.fullmatch(r"[a-z0-9]{1,3}", normalized):
+        return re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", haystack) is not None
+    return normalized in haystack
+
+
 def score_posting(posting: Posting, resume_text: str, desired_locations: list[str], negative_terms: list[str], career_years: int | None) -> Posting:
     haystack = " ".join([posting.title, posting.company, posting.location, posting.career, posting.summary]).lower()
     resume_terms = split_keywords(resume_text)
@@ -265,7 +278,7 @@ def score_posting(posting: Posting, resume_text: str, desired_locations: list[st
         elif "경력" in haystack or re.search(r"\d+\s*년", haystack):
             score += 5
             reasons.append("경력 조건이 있는 공고로 보임")
-    bad_hits = [term for term in negative_terms if term and term.lower() in haystack]
+    bad_hits = [term for term in negative_terms if negative_term_matches(term, haystack)]
     if bad_hits:
         score -= 30
         cautions.append("제외 조건 감지: " + ", ".join(bad_hits[:5]))

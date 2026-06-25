@@ -1,7 +1,6 @@
-import json
 import unittest
 
-from job_posting_match import build_queries, parse_jobkorea, parse_saramin, score_posting
+from job_posting_match import NEGATIVE_DEFAULTS, Posting, build_queries, parse_jobkorea, parse_saramin, score_posting
 
 
 JOBKOREA_FIXTURE = '\n<div data-sentry-component="CardJob">\n  <a href="https://www.jobkorea.co.kr/Recruit/GI_Read/111?x=1">퍼포먼스 마케터 채용</a>\n  <a href="https://www.jobkorea.co.kr/Recruit/GI_Read/111?x=1">커머스A</a>\n  <p>서울 강남구 경력 3년 GA4 Google Ads Meta Ads 커머스</p>\n</div>\n<div data-sentry-component="CardJob">\n  <a href="https://www.jobkorea.co.kr/Recruit/GI_Read/222?x=1">보험영업 담당자</a>\n  <a href="https://www.jobkorea.co.kr/Recruit/GI_Read/222?x=1">보험B</a>\n  <p>대출영업 TM 신입</p>\n</div>\n'
@@ -35,6 +34,20 @@ class JobPostingMatchTest(unittest.TestCase):
         self.assertGreater(good.score, bad.score)
         self.assertTrue(good.reasons)
         self.assertTrue(any("제외 조건" in c for c in bad.cautions))
+
+    def test_score_does_not_match_short_latin_negative_inside_words(self):
+        resume = "프론트엔드 개발자 5년 React TypeScript HTML CSS 서울"
+        posting = Posting(
+            source="fixture",
+            title="프론트엔드 개발자",
+            company="A",
+            summary="React TypeScript HTML CSS 서울 경력 5년",
+        )
+
+        scored = score_posting(posting, resume, ["서울"], NEGATIVE_DEFAULTS, 5)
+
+        self.assertEqual(scored.score, 84)
+        self.assertFalse(any("TM" in caution for caution in scored.cautions))
 
 
 if __name__ == "__main__":
