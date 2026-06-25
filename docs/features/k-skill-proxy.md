@@ -69,32 +69,32 @@ client/skill -> k-skill-proxy -> upstream public API
 
 ## 프로덕션 배포 구조
 
-프로덕션 proxy 서버는 **Google Cloud Run**에서 운영한다.
+프로덕션 proxy 서버는 **gpu01**의 Docker 컨테이너로 운영한다.
 
-- GCP project: `k-skill-proxy`
-- Region: `asia-northeast1` (도쿄)
-- Cloud Run service: `k-skill-proxy`
-- 공개 도메인: `k-skill-proxy.nomadamas.org` (Cloud Run domain mapping)
+- 공개 도메인: `k-skill-proxy.nomadamas.org`
 - 컨테이너 이미지 정의: `packages/k-skill-proxy/Dockerfile`
-- 시크릿(upstream API key): GCP Secret Manager에 보관, Cloud Run runtime에 주입
+- 컨테이너 이름: `k-skill-proxy`
+- gpu01 배포 helper: `scripts/deploy-k-skill-proxy-gpu01.sh`
+- 시크릿(upstream API key): gpu01의 `/etc/k-skill-proxy/secrets.env`에만 보관하고 컨테이너 env로 주입
+- 배포 대상 config: gpu01의 `/etc/k-skill-proxy/deploy.env`
 
-### 자동 배포 (GitHub Actions)
+### 자동 배포 (gpu01 cron)
 
-`main` 브랜치에 push/merge되면 `.github/workflows/deploy-k-skill-proxy.yml` 워크플로가 실행되어 다음 순서로 동작한다.
+gpu01 cron이 주기적으로 배포 helper를 실행한다. cron은 `main` 브랜치를 자동 배포하지 않고, `/etc/k-skill-proxy/deploy.env`에 명시된 `KSKILL_PROXY_DEPLOY_SHA` 또는 `KSKILL_PROXY_DEPLOY_REF`만 배포한다. 배포 대상이 없으면 fail-closed로 종료하며, helper는 절대 `origin/main`을 기본값으로 삼지 않는다.
 
-1. Workload Identity Federation으로 GCP 인증
-2. `packages/k-skill-proxy/Dockerfile`로 이미지 빌드
-3. Artifact Registry (`asia-northeast1-docker.pkg.dev/k-skill-proxy/k-skill/k-skill-proxy:<sha>`)에 push
-4. Cloud Run service `k-skill-proxy` 재배포 (Secret Manager 시크릿 + 런타임 환경변수 주입)
-5. 직접 Cloud Run URL과 `https://k-skill-proxy.nomadamas.org/health` smoke test
+배포 성공 조건은 다음 순서다.
 
-따라서 **main에 merge되어야 프로덕션에 반영**된다. dev 브랜치 변경은 프로덕션에 영향 없음.
+1. 명시된 deploy SHA/ref를 commit SHA로 해석
+2. checkout을 resolved SHA로 detach/force 이동한 뒤 `packages/k-skill-proxy/Dockerfile`로 repo root에서 Docker image build
+3. 후보 컨테이너 local `/health` smoke test
+4. production 컨테이너/route 전환
+5. `https://k-skill-proxy.nomadamas.org/health` public smoke test
+6. 대표 read-only public route smoke test
+7. 모든 public smoke가 통과한 뒤에만 deployed-state 갱신
 
-배포 상태와 로그는 GitHub Actions의 "Deploy k-skill-proxy to Cloud Run" 워크플로 실행 페이지와 GCP Console의 Cloud Run revision/log에서 확인한다.
+Docker daemon/socket/`docker` group 접근은 컨테이너 env를 읽을 수 있으므로 production secret 접근 권한과 동일하게 제한한다.
 
-### 초기 셋업 (운영자 1회 수행)
-
-WIF pool/provider, deploy service account, Secret Manager 시크릿 생성 등 1회성 GCP 셋업 절차와 GitHub repository secrets/variables 등록 방법은 [`docs/deploy-k-skill-proxy.md`](../deploy-k-skill-proxy.md)에 정리되어 있다.
+배포 상태와 로그는 gpu01의 `/var/log/k-skill-proxy/deploy.log`, `docker logs k-skill-proxy`, reverse proxy 로그에서 확인한다. 1회성 gpu01 셋업, cron entry, env/secrets, rollback, legacy GCP cleanup은 [`docs/deploy-k-skill-proxy.md`](../deploy-k-skill-proxy.md)에 정리되어 있다.
 
 ## 기본 공개 정책
 
