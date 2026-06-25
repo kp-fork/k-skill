@@ -42,6 +42,7 @@
     "./hwp",
     "./intercity-bus-booking",
     "./iros-registry-automation",
+    "./job-posting-match",
     "./jobkorea-talent-search",
     "./joseon-sillok-search",
     "./k-dart",
