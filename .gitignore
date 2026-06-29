@@ -5,6 +5,7 @@ node_modules/
 .env.*
 *.dec
 *.plaintext
+.cache/
 .venv/
 __pycache__/
 dist/
