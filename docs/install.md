@@ -120,6 +120,7 @@ npx --yes skills add <owner/repo> \
   --skill cheap-gas-nearby \
   --skill joseon-sillok-search \
   --skill korean-patent-search \
+  --skill naver-ad-performance \
   --skill hipass-receipt \
   --skill seoul-subway-arrival \
   --skill seoul-density \
@@ -414,6 +415,7 @@ node scripts/korean_character_count.js --text $'첫 줄\n둘째 줄🙂' --profi
 - `korean-law-search`
 - `real-estate-search`
 - `korean-patent-search`
+- `naver-ad-performance`
 - `hipass-receipt`
 - `korean-stock-search`
 - `household-waste-info`
