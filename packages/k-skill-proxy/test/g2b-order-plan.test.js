@@ -100,7 +100,8 @@ test("g2b order-plans route proxies search to the selected PPS operation and cac
   assert.equal(body.items[0].bizNm, "청소 용역");
   assert.equal(body.query.operation, "getOrderPlanSttusListServcPPSSrch");
   assert.match(seenUrls[0], /OrderPlanSttusService\/getOrderPlanSttusListServcPPSSrch/);
-  assert.match(seenUrls[0], /serviceKey=data-go-key/);
+  assert.match(seenUrls[0], /ServiceKey=data-go-key/);
+  assert.doesNotMatch(seenUrls[0], /[?&]serviceKey=/);
   assert.match(seenUrls[0], /bizNm=%EC%B2%AD%EC%86%8C/);
 
   const cached = await app.inject({ method: "GET", url });
