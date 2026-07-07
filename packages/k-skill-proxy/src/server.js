@@ -51,7 +51,12 @@ const {
   normalizeKoreanLawSearchQuery,
   proxyKoreanLawRequest
 } = require("./korean-law");
-const { normalizeNhisLongTermCareQuery, proxyNhisLongTermCareRequest } = require("./nhis-care");
+const {
+  normalizeNhisCheckupQuery,
+  normalizeNhisLongTermCareQuery,
+  proxyNhisCheckupRequest,
+  proxyNhisLongTermCareRequest
+} = require("./nhis-care");
 const AIR_KOREA_UPSTREAM_BASE_URL = "http://apis.data.go.kr";
 const DATA_GO_KR_UPSTREAM_BASE_URL = "https://apis.data.go.kr";
 const DATA4LIBRARY_UPSTREAM_BASE_URL = "https://data4library.kr/api";
@@ -1903,6 +1908,7 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
         ntsBusinessConfigured: Boolean(config.molitApiKey),
         kstartupConfigured: Boolean(config.molitApiKey),
         nhisCareConfigured: Boolean(config.molitApiKey),
+        nhisCheckupConfigured: Boolean(config.molitApiKey),
         nationalPensionConfigured: Boolean(config.molitApiKey),
         fscCorpConfigured: Boolean(config.molitApiKey),
         g2bSanctionConfigured: Boolean(config.molitApiKey),
@@ -2511,6 +2517,41 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
     }
 
     const upstream = await proxyNhisLongTermCareRequest({
+      params: normalized,
+      serviceKey: config.molitApiKey
+    });
+
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
+
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  });
+
+  app.get("/v1/nhis/checkup/:operation", async (request, reply) => {
+    let normalized;
+
+    try {
+      normalized = normalizeNhisCheckupQuery(request.params.operation, request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return {
+        error: "bad_request",
+        message: error.message
+      };
+    }
+
+    const cacheKey = makeCacheKey({ route: "nhis-checkup", ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyNhisCheckupRequest({
       params: normalized,
       serviceKey: config.molitApiKey
     });
@@ -5132,6 +5173,7 @@ module.exports = {
   normalizeKosisMetaQuery,
   normalizeKosisSearchQuery,
   normalizeKstartupQuery,
+  normalizeNhisCheckupQuery,
   normalizeNhisLongTermCareQuery,
   normalizeKoreanStockLookupQuery,
   normalizeKoreanStockSearchQuery,
@@ -5160,6 +5202,7 @@ module.exports = {
   proxyKmaWeatherRequest,
   proxyKosisRequest,
   proxyKstartupRequest,
+  proxyNhisCheckupRequest,
   proxyNhisLongTermCareRequest,
   fetchKakaoLocalEndpoint,
   fetchKakaoMobilityDirections,
