@@ -51,6 +51,7 @@ const {
   normalizeKoreanLawSearchQuery,
   proxyKoreanLawRequest
 } = require("./korean-law");
+const { normalizeKoreanHolidayQuery, proxyKoreanHolidayRequest } = require("./korean-holiday");
 const AIR_KOREA_UPSTREAM_BASE_URL = "http://apis.data.go.kr";
 const DATA_GO_KR_UPSTREAM_BASE_URL = "https://apis.data.go.kr";
 const DATA4LIBRARY_UPSTREAM_BASE_URL = "https://data4library.kr/api";
@@ -1904,7 +1905,8 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
         nationalPensionConfigured: Boolean(config.molitApiKey),
         fscCorpConfigured: Boolean(config.molitApiKey),
         g2bSanctionConfigured: Boolean(config.molitApiKey),
-        koreanLawConfigured: Boolean(config.lawOc)
+        koreanLawConfigured: Boolean(config.lawOc),
+        koreanHolidayConfigured: Boolean(config.molitApiKey)
       },
       auth: {
         tokenRequired: false
@@ -2485,6 +2487,39 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
     }
 
     return payload;
+  });
+
+  app.get("/v1/korean-holiday/calendar", async (request, reply) => {
+    let normalized;
+
+    try {
+      normalized = normalizeKoreanHolidayQuery(request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return {
+        error: "bad_request",
+        message: error.message
+      };
+    }
+
+    const cacheKey = makeCacheKey({ route: "korean-holiday-calendar", ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyKoreanHolidayRequest({
+      params: normalized,
+      serviceKey: config.molitApiKey
+    });
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
   });
 
   app.get("/v1/han-river/water-level", async (request, reply) => {
@@ -5095,6 +5130,7 @@ module.exports = {
   normalizeKosisMetaQuery,
   normalizeKosisSearchQuery,
   normalizeKstartupQuery,
+  normalizeKoreanHolidayQuery,
   normalizeKoreanStockLookupQuery,
   normalizeKoreanStockSearchQuery,
   normalizeLhNoticeDetailQuery,
@@ -5122,6 +5158,7 @@ module.exports = {
   proxyKmaWeatherRequest,
   proxyKosisRequest,
   proxyKstartupRequest,
+  proxyKoreanHolidayRequest,
   fetchKakaoLocalEndpoint,
   fetchKakaoMobilityDirections,
   fetchNaverShoppingSearch,
