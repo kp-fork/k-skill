@@ -216,7 +216,7 @@ function extractOrderPlanItems(payload) {
 }
 
 function appendParams(url, params, serviceKey) {
-  url.searchParams.set("serviceKey", serviceKey);
+  url.searchParams.set("ServiceKey", serviceKey);
   url.searchParams.set("type", "json");
   for (const [key, value] of Object.entries(params)) {
     if (["kind", "operation"].includes(key)) continue;
