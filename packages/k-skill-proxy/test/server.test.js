@@ -2562,21 +2562,24 @@ test("proxyAirKoreaRequest injects serviceKey and preserves caller query params"
   assert.match(calledUrl, /serviceKey=test-service-key/);
 });
 
-test("proxyAirKoreaRequest redacts a service key echoed by upstream", async () => {
-  const result = await proxyAirKoreaRequest({
-    service: "ArpltnInforInqireSvc",
-    operation: "getMsrstnAcctoRltmMesureDnsty",
-    query: { returnType: "json", stationName: "강남구" },
-    serviceKey: "airkorea-secret+/=",
-    fetchImpl: async () => new Response(
-      "failed serviceKey=airkorea-secret+/= encoded=airkorea-secret%2B%2F%3D",
-      { status: 500, headers: { "content-type": "text/plain" } }
-    )
-  });
+test("proxyAirKoreaRequest redacts service keys echoed with URLSearchParams encoding", async () => {
+  for (const serviceKey of ["fake~secret", "fake secret", "fake!secret", "airkorea-secret+/="]) {
+    const serialized = new URLSearchParams({ serviceKey }).toString();
+    const result = await proxyAirKoreaRequest({
+      service: "ArpltnInforInqireSvc",
+      operation: "getMsrstnAcctoRltmMesureDnsty",
+      query: { returnType: "json", stationName: "강남구" },
+      serviceKey,
+      fetchImpl: async () => new Response(
+        `failed ${serialized}`,
+        { status: 500, headers: { "content-type": "text/plain" } }
+      )
+    });
 
-  assert.equal(result.statusCode, 500);
-  assert.doesNotMatch(result.body, /airkorea-secret/);
-  assert.match(result.body, /\[REDACTED\]/);
+    assert.equal(result.statusCode, 500);
+    assert.doesNotMatch(result.body, /fake|airkorea-secret|serviceKey=(?!\[REDACTED\])/);
+    assert.match(result.body, /serviceKey=\[REDACTED\]/);
+  }
 });
 
 test("AirKorea fetch rejections do not expose credential-bearing URLs", async (t) => {

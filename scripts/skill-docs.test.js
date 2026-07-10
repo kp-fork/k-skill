@@ -672,10 +672,12 @@ test("proxy deployment workflow and docs stay aligned with Cloud Run automation"
   assert.match(workflow, /ASSEMBLY_API_KEY=ASSEMBLY_API_KEY:latest/);
   assert.match(workflow, /KOPIS_API_KEY=KOPIS_API_KEY:latest/);
   assert.match(workflow, /^\s+tag: candidate$/m);
+  assert.match(workflow, /^\s+suffix: \$\{\{ github\.sha \}\}$/m);
   assert.match(workflow, /^\s+no_traffic: true$/m);
   assert.match(workflow, /Smoke test \/health on the new revision/);
   assert.match(workflow, /gcloud run services update-traffic/);
-  assert.match(workflow, /--to-latest/);
+  assert.match(workflow, /--to-revisions "\$\{REVISION_NAME\}=100"/);
+  assert.doesNotMatch(workflow, /--to-latest/);
   assert.match(dockerfile, /COPY package\.json package-lock\.json/);
   assert.match(dockerfile, /npm ci --omit=dev --workspace k-skill-proxy/);
   assert.match(dockerignore, /^gha-creds-\*\.json$/m);

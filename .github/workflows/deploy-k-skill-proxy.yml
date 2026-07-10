@@ -75,6 +75,7 @@ jobs:
           region: ${{ env.GCP_REGION }}
           image: ${{ steps.image.outputs.uri }}
           tag: candidate
+          suffix: ${{ github.sha }}
           no_traffic: true
           secrets: |-
             AIR_KOREA_OPEN_API_KEY=AIR_KOREA_OPEN_API_KEY:latest
@@ -141,11 +142,13 @@ jobs:
           "
 
       - name: Promote the healthy revision to production traffic
-        run: >-
-          gcloud run services update-traffic "${SERVICE_NAME}"
-          --region "${GCP_REGION}"
-          --to-latest
-          --quiet
+        run: |
+          set -euo pipefail
+          REVISION_NAME="${SERVICE_NAME}-${GITHUB_SHA}"
+          gcloud run services update-traffic "${SERVICE_NAME}" \
+            --region "${GCP_REGION}" \
+            --to-revisions "${REVISION_NAME}=100" \
+            --quiet
 
       - name: Smoke test custom domain (k-skill-proxy.nomadamas.org)
         run: |

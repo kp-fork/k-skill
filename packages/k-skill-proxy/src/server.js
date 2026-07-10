@@ -1250,12 +1250,15 @@ function isAllowedAirKoreaRoute(service, operation) {
 
 function redactSecretValue(text, secret) {
   let redacted = String(text);
-  for (const candidate of [String(secret), encodeURIComponent(String(secret))]) {
+  const serializedSecret = new URLSearchParams({ serviceKey: String(secret) })
+    .toString()
+    .slice("serviceKey=".length);
+  for (const candidate of [String(secret), encodeURIComponent(String(secret)), serializedSecret]) {
     if (candidate) {
       redacted = redacted.split(candidate).join("[REDACTED]");
     }
   }
-  return redacted;
+  return redacted.replace(/serviceKey(?:=|%3D)[^&\s"'<>\\]+/giu, "serviceKey=[REDACTED]");
 }
 
 async function proxyAirKoreaRequest({ service, operation, query, serviceKey, fetchImpl = global.fetch }) {
