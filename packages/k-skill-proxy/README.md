@@ -77,6 +77,8 @@
 - `KSKILL_PROXY_CACHE_TTL_MS` — 기본 `300000`
 - `KSKILL_PROXY_RATE_LIMIT_WINDOW_MS` — 기본 `60000`
 - `KSKILL_PROXY_RATE_LIMIT_MAX` — 기본 `60`
+- `KSKILL_PROXY_RATE_LIMIT_MAX_CLIENTS` — 메모리에 유지할 client rate-limit bucket 상한, 기본 `10000`
+- `KSKILL_PROXY_TRUST_PROXY_HOPS` — Fastify가 신뢰할 reverse-proxy hop 수, 기본 `0`. Cloud Run 배포는 GFE와 container ingress 두 hop 뒤의 client IP를 사용하도록 `2`로 고정하며, 직접 노출되는 로컬 서버에서는 설정하지 않는다.
 - `DATA_GO_KR_API_KEY` - 공공데이터포털 에서 쓰이는 API 인증키 (`household-waste`, `parking-lots`, `real-estate`, `nts-business`, `mfds-drug-safety`, `mfds-food-safety`, `lh-notice`, `nhis/*`). 각 서비스는 공공데이터포털에서 별도 "활용신청" 승인이 필요하다. 키를 발급받은 뒤에는 [LH 임대공고문 정보](https://www.data.go.kr/data/15058530/openapi.do), [국민건강보험공단 장기요양기관 검색 서비스](https://www.data.go.kr/data/15059029/openapi.do), [국민건강보험공단 검진기관 찾기 조회](https://www.data.go.kr/data/15154419/openapi.do) 페이지에서도 활용신청을 눌러 동일 키를 활성화해야 해당 라우트가 성공한다. 미활성 상태에서는 upstream이 HTTP 403 Forbidden 또는 data.go.kr gateway 오류를 돌려주고 proxy는 upstream error로 변환한다.
 
 기본 정책은 **무료 API 공개 프록시 = 무인증** 이다. 대신 endpoint scope 를 좁게 유지하고, cache + rate limit 으로 남용을 늦춘다.

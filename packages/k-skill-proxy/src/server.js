@@ -219,7 +219,8 @@ function buildConfig(env = process.env) {
     cacheMaxEntries: Math.max(1, parseInteger(env.KSKILL_PROXY_CACHE_MAX_ENTRIES, 1000)),
     rateLimitWindowMs: parseInteger(env.KSKILL_PROXY_RATE_LIMIT_WINDOW_MS, 60000),
     rateLimitMax: parseInteger(env.KSKILL_PROXY_RATE_LIMIT_MAX, 60),
-    rateLimitMaxClients: Math.max(1, parseInteger(env.KSKILL_PROXY_RATE_LIMIT_MAX_CLIENTS, 10000))
+    rateLimitMaxClients: Math.max(1, parseInteger(env.KSKILL_PROXY_RATE_LIMIT_MAX_CLIENTS, 10000)),
+    trustProxyHops: Math.max(0, parseInteger(env.KSKILL_PROXY_TRUST_PROXY_HOPS, 0))
   };
 }
 
@@ -1935,7 +1936,8 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
   const rateLimit = buildRateLimiter(config);
   const app = Fastify({
     logger: true,
-    logController: new LogController({ disableRequestLogging: true })
+    logController: new LogController({ disableRequestLogging: true }),
+    trustProxy: config.trustProxyHops || false
   });
 
   app.decorate("configValues", config);

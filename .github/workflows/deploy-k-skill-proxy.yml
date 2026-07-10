@@ -103,6 +103,7 @@ jobs:
             KSKILL_PROXY_RATE_LIMIT_WINDOW_MS=60000
             KSKILL_PROXY_RATE_LIMIT_MAX=60
             KSKILL_PROXY_RATE_LIMIT_MAX_CLIENTS=10000
+            KSKILL_PROXY_TRUST_PROXY_HOPS=2
           flags: >-
             --platform=managed
             --allow-unauthenticated

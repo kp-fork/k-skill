@@ -71,11 +71,22 @@ gcloud iam workload-identity-pools providers create-oidc "$PROVIDER_ID" \
   --workload-identity-pool="$POOL_ID" \
   --display-name="GitHub OIDC" \
   --issuer-uri="https://token.actions.githubusercontent.com" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner" \
-  --attribute-condition="assertion.repository == '${GH_REPO}'"
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner,attribute.ref=assertion.ref,attribute.job_workflow_ref=assertion.job_workflow_ref" \
+  --attribute-condition="assertion.repository == '${GH_REPO}' && assertion.ref == 'refs/heads/main' && assertion.job_workflow_ref == '${GH_REPO}/.github/workflows/deploy-k-skill-proxy.yml@refs/heads/main'"
 ```
 
-> `attribute-condition`은 토큰 발급 단계에서 우리 저장소만 허용해 풀 자체를 좁힙니다. 임의의 다른 repo가 같은 풀을 통해 SA를 impersonate하지 못하게 막는 핵심 가드입니다.
+> `attribute-condition`은 토큰 발급 단계에서 저장소, `main` ref, 배포 워크플로 identity를 모두 고정합니다. 다른 브랜치나 다른 workflow가 같은 pool과 deploy SA를 재사용해 production 권한을 얻지 못하게 하는 핵심 가드입니다.
+
+기존 provider가 저장소 조건만 사용한다면 다음 명령으로 동일한 제한을 즉시 적용합니다.
+
+```bash
+gcloud iam workload-identity-pools providers update-oidc "$PROVIDER_ID" \
+  --project="$PROJECT_ID" \
+  --location=global \
+  --workload-identity-pool="$POOL_ID" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner,attribute.ref=assertion.ref,attribute.job_workflow_ref=assertion.job_workflow_ref" \
+  --attribute-condition="assertion.repository == '${GH_REPO}' && assertion.ref == 'refs/heads/main' && assertion.job_workflow_ref == '${GH_REPO}/.github/workflows/deploy-k-skill-proxy.yml@refs/heads/main'"
+```
 
 ### 3) Deploy service account 생성
 

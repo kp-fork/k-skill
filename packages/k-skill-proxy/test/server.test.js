@@ -1909,6 +1909,36 @@ test("korean stock search rate limit does not trust spoofed cf-connecting-ip on 
   assert.equal(second.json().error, "rate_limited");
 });
 
+test("rate limit separates Cloud Run clients behind two trusted proxy hops", async (t) => {
+  const app = buildServer({
+    env: {
+      KSKILL_PROXY_RATE_LIMIT_MAX: "1",
+      KSKILL_PROXY_TRUST_PROXY_HOPS: "2"
+    }
+  });
+
+  t.after(async () => {
+    await app.close();
+  });
+
+  const request = (clientIp) => app.inject({
+    method: "GET",
+    url: "/v1/korean-stock/search?q=%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90&bas_dd=20260404",
+    headers: {
+      "x-forwarded-for": `203.0.113.200, ${clientIp}, 35.191.0.1`
+    }
+  });
+
+  const firstClient = await request("198.51.100.10");
+  const secondClient = await request("198.51.100.11");
+  const firstClientAgain = await request("198.51.100.10");
+
+  assert.equal(firstClient.statusCode, 503);
+  assert.equal(secondClient.statusCode, 503);
+  assert.equal(firstClientAgain.statusCode, 429);
+  assert.equal(firstClientAgain.json().error, "rate_limited");
+});
+
 test("korean stock search surfaces degraded upstream metadata when another market fails", async (t) => {
   const originalFetch = global.fetch;
   const fetchCalls = [];
