@@ -191,6 +191,8 @@ done
 `gcloud auth login`으로 maintainer 계정에 로그인된 상태에서:
 
 ```bash
+set -euo pipefail
+
 SHA="$(git rev-parse HEAD)"
 IMAGE_URI="asia-northeast1-docker.pkg.dev/k-skill-proxy/k-skill/k-skill-proxy:${SHA}"
 REVISION_NAME="k-skill-proxy-${SHA}"
