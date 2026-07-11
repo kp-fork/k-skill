@@ -37,11 +37,13 @@ function textAfter(source, anchorHtml) {
 
 function classifyBlockedHtml(html) {
   const text = cleanText(stripTags(html))
-  if (/400\s*Bad Request|deceptive request routing|traffic|TouchEn|보안|차단|점검|login|로그인/i.test(text)) {
+  if (/400\s*Bad Request|deceptive request routing|traffic|TouchEn|보안\s*(?:프로그램|모듈|오류)|(?:접근|요청|서비스)\s*차단|(?:페이지|서비스)\s*점검\s*중|로그인\s*(?:후|필요|페이지|하십시오|하셔야)/i.test(text)) {
     return { status: "blocked", reason: text.slice(0, 300) }
   }
   return { status: "ok", reason: "" }
 }
+
+const BID_CATEGORY_PATTERN = "(?:경쟁입찰|공개수의|수의계약|일반경쟁|제한경쟁)"
 
 function parseNoticeListText(text, options = {}) {
   const sourceText = cleanText(text)
@@ -62,13 +64,13 @@ function parseTotalCount(text) {
 
 function extractCandidateRows(text) {
   const normalized = cleanText(text)
-  const pattern = /(?:^|\s)(\d+\s+(?:물품|용역|공사|국외)\s+경쟁입찰\s+.+?)(?=\s+\d+\s+(?:물품|용역|공사|국외)\s+경쟁입찰\s+|순번\s+업무구분|$)/g
+  const pattern = new RegExp(`(?:^|\\s)(\\d+\\s+(?:물품|용역|공사|국외)\\s+${BID_CATEGORY_PATTERN}\\s+.+?)(?=\\s+\\d+\\s+(?:물품|용역|공사|국외)\\s+${BID_CATEGORY_PATTERN}\\s+|순번\\s+업무구분|$)`, "g")
   return Array.from(normalized.matchAll(pattern), (match) => match[1])
 }
 
 function parseCandidateRow(row) {
   const normalized = cleanText(row)
-  const pattern = /^(\d+)\s+(물품|용역|공사|국외)\s+(경쟁입찰)\s+(\S+)\s+(\d{4}-\d{2}-\d{2})\s+([A-Z0-9-]+)\s+([A-Z0-9]+)\s+([A-Z0-9]+)\s+(.+)$/
+  const pattern = new RegExp(`^(\\d+)\\s+(물품|용역|공사|국외)\\s+(${BID_CATEGORY_PATTERN})\\s+(\\S+)\\s+(\\d{4}-\\d{2}-\\d{2})\\s+([A-Z0-9-]+)\\s+([A-Z0-9]+)\\s+([A-Z0-9]+)\\s+(.+)$`)
   const prefix = normalized.match(pattern)
   if (!prefix) return null
   const rest = prefix[9]
@@ -106,17 +108,33 @@ function extractAgency(text) {
 }
 
 function parseSchedule(text) {
-  const deadlinePattern = /(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})/g
-  const deadlines = Array.from(text.matchAll(deadlinePattern), (match) => match[1])
-  const tail = cleanText(text.replace(deadlinePattern, " "))
-  const tailTokens = tail.split(" ").filter(Boolean)
+  const tokens = cleanText(text).split(" ").filter(Boolean)
+  const schedule = []
+  let index = 0
+  for (; schedule.length < 2 && index < tokens.length; index += 1) {
+    const token = readScheduleToken(tokens, index)
+    if (!token) break
+    schedule.push(token.value)
+    index = token.nextIndex - 1
+  }
+  const tailTokens = tokens.slice(index)
   return {
-    registrationDueAt: deadlines[0] || null,
-    bidDueAt: deadlines[1] || null,
+    registrationDueAt: nullableDeadline(schedule[0]),
+    bidDueAt: nullableDeadline(schedule[1]),
     contractMethod: tailTokens[0] || null,
     bidForm: tailTokens[1] || null,
     basePriceStatus: tailTokens.slice(2).join(" ") || null
   }
+}
+
+function readScheduleToken(tokens, index) {
+  const value = tokens[index]
+  const next = tokens[index + 1]
+  if (value === "해당없음") return { value, nextIndex: index + 1 }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value) && /^\d{2}:\d{2}$/.test(next || "")) {
+    return { value: `${value} ${next}`, nextIndex: index + 2 }
+  }
+  return null
 }
 
 function nullableDeadline(value) {

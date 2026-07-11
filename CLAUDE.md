@@ -16,7 +16,8 @@
 
 - 개발 repo: 이 디렉토리, `dev` 브랜치
 - 프로덕션 배포 대상: **Google Cloud Run** (project `k-skill-proxy`, region `asia-northeast1`, custom domain `k-skill-proxy.nomadamas.org`)
-- `main` 브랜치에 merge되면 `.github/workflows/deploy-k-skill-proxy.yml`이 자동으로 Cloud Run 재배포를 수행한다. 인증은 Workload Identity Federation, 이미지 빌드 정의는 `packages/k-skill-proxy/Dockerfile`, 시크릿은 GCP Secret Manager에서 주입된다. WIF/Secret Manager 셋업은 `docs/deploy-k-skill-proxy.md` 참고.
+- `main` 브랜치에 merge되면 `.github/workflows/deploy-k-skill-proxy.yml`이 Workload Identity Federation으로 GCP 인증하고 Artifact Registry image build/push, Cloud Run 재배포, `/health` smoke test를 수행한다.
+- 프로덕션 시크릿은 GCP Secret Manager에서 Cloud Run runtime에 주입된다. WIF/Secret Manager 셋업과 운영 절차는 `docs/deploy-k-skill-proxy.md` 참고.
 - 따라서 proxy route 변경은 **main에 merge되어야 프로덕션에 반영**된다. dev에서 코드를 바꿔도 프로덕션 proxy에는 영향 없음.
 - 로컬 테스트는 `node packages/k-skill-proxy/src/server.js` 로 직접 실행하거나 `node --test packages/k-skill-proxy/test/server.test.js` 로 확인.
 - **Proxy 편입 규칙**: k-skill-proxy에 route를 추가하려면 upstream이 API 키를 필요로 해야 한다. 공개 엔드포인트(키 불필요)는 skill 코드에서 직접 호출하고 프록시를 거치지 않는다.

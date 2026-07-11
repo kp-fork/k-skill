@@ -36,6 +36,14 @@ These rules are repo-specific and apply to everything under this directory.
 - Record the discovered site-dependent access path, fallback order, inputs/outputs, and failure modes in `SKILL.md` and any helper package code. See `docs/adding-a-skill.md` for the canonical checklist.
 - Do not add crawling dependencies by default; first prefer existing runtime capabilities, public endpoints, or narrow allowlisted proxy routes.
 
+## Browser runtime skill authoring
+
+- For new or changed Node skills that need a logged-in browser session, rendered-page automation, or CDP browser fallback, use `k-skill-browser-runtime` as the default browser runtime instead of writing ad hoc CDP or Playwright connection code.
+- The default provider is `auto`: attach to a user-launched BrowserOS GUI session first (`KSKILL_BROWSEROS_CDP_URL`, default `http://127.0.0.1:9100`), use Aside Browser through the documented `aside repl` CLI when available, then fall back to a user-launched Chrome/Chromium CDP session (`KSKILL_CHROME_CDP_URL`, default `http://127.0.0.1:9222`). `KSKILL_BROWSER_PROVIDER` may pin `auto`, `browseros`, `aside`, or `chrome-cdp`.
+- BrowserOS is CDP-only attach; Aside is CLI REPL-backed, not an undocumented CDP port. Skills must not launch BrowserOS or Aside, pass headless flags to BrowserOS, close the user browser/profile, solve login/CAPTCHA/payment/e-signature flows, or automate irreversible submission. Disconnect automation clients and clean up only pages/contexts/tabs the skill created.
+- Package dependencies must use publishable semver such as `"k-skill-browser-runtime": "^0.1.0"`; do not use `workspace:` for publishable packages.
+- Keep site-specific navigation, selectors, parsing, fallback order, and typed stop/failure modes in the skill's `SKILL.md` and helper package code. Prefer public/direct HTTP endpoints before browser automation when they are stable and do not require authentication.
+
 ## Free API proxy policy
 
 - The built-in `k-skill-proxy` is for **free APIs only**.
@@ -46,14 +54,13 @@ These rules are repo-specific and apply to everything under this directory.
 
 ## Proxy server development
 
-- 개발 repo (`dev` 브랜치)에서 proxy 코드를 수정하고, 프로덕션 승격은 gpu01의 host-configured deploy SHA/ref를 갱신해서 수행한다. `main` merge 자체는 프로덕션 배포가 아니다.
-- 프로덕션 배포 대상은 **gpu01**의 Docker 컨테이너이며, 커스텀 도메인 `k-skill-proxy.nomadamas.org`로 노출된다.
-- gpu01 cron이 `/etc/k-skill-proxy/deploy.env`의 `KSKILL_PROXY_DEPLOY_SHA` 또는 `KSKILL_PROXY_DEPLOY_REF`만 배포한다. 배포 대상이 없으면 fail-closed로 종료하며, 절대 `origin/main`을 기본 배포 대상으로 삼지 않는다.
-- public `https://k-skill-proxy.nomadamas.org/health` smoke test와 대표 public route smoke가 통과한 뒤에만 deployed-state를 갱신한다. public smoke 실패는 배포 실패이며 rollback 대상이다.
+- 개발 repo (`dev` 브랜치)에서 proxy 코드를 수정하고, main에 merge하면 프로덕션에 반영된다.
+- 프로덕션 배포 대상은 **Google Cloud Run** (`asia-northeast1`, GCP project `k-skill-proxy`)이며, 커스텀 도메인 `k-skill-proxy.nomadamas.org`로 노출된다.
+- `main` 브랜치에 merge되면 `.github/workflows/deploy-k-skill-proxy.yml`이 Workload Identity Federation으로 GCP 인증 → Artifact Registry로 image build/push → Cloud Run 재배포 → `/health` smoke test까지 자동으로 수행한다.
+- 따라서 **dev에서 route를 추가/수정한 뒤 main에 merge되기 전까지는 프로덕션 proxy에 반영되지 않는다.**
 - proxy 서버 코드: `packages/k-skill-proxy/src/server.js`
 - 컨테이너 이미지 빌드 정의: `packages/k-skill-proxy/Dockerfile`
-- gpu01 배포 helper: `scripts/deploy-k-skill-proxy-gpu01.sh`
 - proxy 서버 테스트: `packages/k-skill-proxy/test/server.test.js`
 - 로컬 테스트: `node packages/k-skill-proxy/src/server.js` (환경변수는 `~/.config/k-skill/secrets.env` 등에서 직접 export해서 띄운다)
-- 프로덕션 시크릿은 gpu01의 `/etc/k-skill-proxy/secrets.env`에만 보관한다 (`0600` 또는 더 엄격, repo/GitHub Actions에 저장 금지). Docker daemon/socket/`docker` group 접근은 컨테이너 env를 읽을 수 있으므로 프로덕션 시크릿 접근 권한과 동일하게 취급한다.
-- **운영 관련 모든 절차는 [`docs/deploy-k-skill-proxy.md`](docs/deploy-k-skill-proxy.md)에 정리되어 있다.** gpu01 1회성 셋업, explicit deploy SHA/ref 승격, cron 설정, env/secrets, hard public smoke gate, 로그, full serving-path rollback(container/image/SHA/port/reverse-proxy/routing/timestamp), legacy GCP cleanup까지 전부 거기서 본다. proxy 운영 관련 어떤 질문이 들어와도 먼저 그 문서를 확인한다.
+- 프로덕션 시크릿은 GCP Secret Manager에 보관되고 Cloud Run runtime에 주입된다.
+- **운영 관련 모든 절차는 [`docs/deploy-k-skill-proxy.md`](docs/deploy-k-skill-proxy.md)에 정리되어 있다.** 새 maintainer 인계를 위한 1회성 GCP/WIF 셋업, GitHub repository secrets 등록, upstream API 키 회전(rotation), 자동 배포 상태/로그/이미지 태그 확인, Cloud Run 트래픽 롤백, GitHub Actions 장애 시 로컬에서 동일한 배포를 수동으로 돌리는 비상 명령까지 전부 거기서 본다. proxy 운영 관련 어떤 질문이 들어와도 먼저 그 문서를 확인한다.

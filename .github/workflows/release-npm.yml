@@ -1,7 +1,6 @@
 name: Release npm packages
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main

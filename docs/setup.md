@@ -61,6 +61,19 @@ chmod 0600 ~/.config/k-skill/secrets.env
 
 한국 특허 정보 검색의 KIPRIS Plus 경로용 `KIPRIS_PLUS_API_KEY` 는 helper가 읽는 표준 변수명이다. 실제 HTTP 요청에서는 같은 값을 `ServiceKey` 쿼리 파라미터로 보낸다. 공공데이터포털에서 복사한 percent-encoded key도 helper가 한 번 정규화해서 그대로 쓸 수 있다.
 
+## 브라우저 런타임 (BrowserOS)
+
+브라우저 세션이 필요한 스킬(`hipass-receipt`, `court-auction-notice-search`, `court-payment-order-assistant`)은 `k-skill-browser-runtime`을 기본 런타임으로 쓴다. 기본 `auto` 순서는 BrowserOS CDP → Aside Browser REPL → Chrome/Chromium CDP다. 런타임은 BrowserOS를 launch하거나 headless로 띄우지 않고, Aside는 공개 `aside repl` 표면만 쓴다. 자세한 작성 가이드는 [브라우저 런타임 문서](browser-runtime.md)와 [새 스킬 추가 가이드](adding-a-skill.md)를 참고.
+
+| 변수 | 기본값 | 설명 |
+| --- | --- | --- |
+| `KSKILL_BROWSER_PROVIDER` | `auto` | `auto`(BrowserOS → Aside Browser → Chrome CDP), `browseros`, `aside`, `chrome-cdp` |
+| `KSKILL_BROWSEROS_CDP_URL` | `http://127.0.0.1:9100` | BrowserOS CDP 엔드포인트 |
+| `KSKILL_CHROME_CDP_URL` | `http://127.0.0.1:9222` | Chrome/Chromium CDP 엔드포인트 |
+| `KSKILL_ASIDE_COMMAND` | `aside` | Aside CLI 명령 이름 또는 경로 |
+
+브라우저가 필요한 스킬은 로그인/인증/CAPTCHA/결제/전자서명/되돌릴 수 없는 제출을 자동화하지 않고, 해당 경계에서 typed stop rule로 멈춰 사용자에게 수동 handoff한다. 공개 데이터는 직접 HTTP를 먼저 쓴다.
+
 ## 확인
 
 ```bash
@@ -87,7 +100,7 @@ bash scripts/check-setup.sh
 | 한국 부동산 실거래가 조회 | 사용자 시크릿 불필요 (기본 hosted proxy 사용) |
 | 한국 특허 정보 검색 | `KIPRIS_PLUS_API_KEY` |
 | 팝빌 업무 API | `KSKILL_POPBILL_LINK_ID`, `KSKILL_POPBILL_SECRET_KEY`, `KSKILL_POPBILL_CORP_NUM`, 선택 `KSKILL_POPBILL_USER_ID` |
-| 하이패스 영수증 발급 | 사용자 시크릿 불필요 (로그인된 브라우저 세션 필요) |
+| 하이패스 영수증 발급 | 사용자 시크릿 불필요 (기본 `auto`: BrowserOS CDP → Aside Browser → Chrome CDP 세션에서 수동 로그인, [브라우저 런타임](browser-runtime.md) 참고) |
 | 한국 주식 정보 조회 | 사용자 시크릿 불필요 (기본 hosted proxy 사용, 운영자만 `KRX_API_KEY`) |
 | 근처 가장 싼 주유소 찾기 | 사용자 시크릿 불필요 (기본 hosted proxy 사용) |
 | 서울 지하철 도착정보 조회 | 사용자 시크릿 불필요 (기본 hosted proxy 사용, 운영자만 `SEOUL_OPEN_API_KEY`) |
@@ -131,5 +144,6 @@ bash scripts/check-setup.sh
 - [팝빌 all-service API helper](features/popbill.md)
 - [지방선거 후보자 조회 가이드](features/local-election-candidate-search.md)
 - [보안/시크릿 정책](security-and-secrets.md)
+- [브라우저 런타임 가이드](browser-runtime.md)
 
 설치 기본 흐름은 "전체 스킬 설치 → 개별 기능 사용" 이다.

@@ -15,7 +15,9 @@
 npm install yebigun-training
 ```
 
-이 패키지는 CDP 연결용 `playwright-core` 를 함께 설치한다. 별도 Playwright 브라우저 번들을 받지 않고, 사용자가 직접 띄운 기존 Chrome/Chromium 프로필에 연결한다.
+이 패키지는 [`k-skill-browser-runtime`](../k-skill-browser-runtime) 런타임 어댑터로 브라우저에 붙는다. 기본 순서는 사용자가 띄운 BrowserOS CDP, Aside Browser REPL, Chrome/Chromium CDP다.
+
+기본 provider 는 `auto` 로, BrowserOS CDP(`http://127.0.0.1:9100`) → Aside Browser(`aside repl`) → Chrome CDP(`http://127.0.0.1:9222`) 순서다. `KSKILL_BROWSER_PROVIDER=browseros`/`=aside`/`=chrome-cdp` 또는 `options.provider` 로 provider 를 고정할 수 있고, `--cdp-url`(`options.cdpUrl`)을 넘기면 그 URL(예: `yebigun-training chrome-command` 로 띄운 Chrome)에 직접 붙는다. `KSKILL_BROWSEROS_CDP_URL`/`KSKILL_CHROME_CDP_URL` 로 URL 을 덮어쓸 수 있고, `KSKILL_ASIDE_COMMAND` 로 Aside CLI 명령을 바꿀 수 있다. 런타임은 BrowserOS/Aside 를 launch 하거나 BrowserOS 를 headless 로 띄우지 않으며, 정리 시 automation client 와 adapter 생성 tab 만 정리하고 사용자 브라우저/프로필은 닫지 않는다.
 
 ## Start Chrome with a dedicated profile
 

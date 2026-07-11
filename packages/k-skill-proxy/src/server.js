@@ -1,5 +1,14 @@
+// allow: SIZE_OK - Central Fastify composition root; provider logic is split into route modules.
 const crypto = require("node:crypto");
 const Fastify = require("fastify");
+const { LogController } = Fastify;
+const {
+  isAssemblyErrorBody,
+  normalizeAssemblyBillDetailQuery,
+  normalizeAssemblyBillSearchQuery,
+  normalizeAssemblyVoteQuery,
+  proxyAssemblyRequest
+} = require("./assembly");
 const { fetchFineDustReport } = require("./airkorea");
 const { fetchWaterLevelReport } = require("./hrfco");
 const { KRX_MARKETS, fetchBaseInfo, fetchTradeInfo, getCurrentKstDate, searchStocks } = require("./krx-stock");
@@ -51,6 +60,15 @@ const {
   normalizeKoreanLawSearchQuery,
   proxyKoreanLawRequest
 } = require("./korean-law");
+const { normalizeKoreanHolidayQuery, proxyKoreanHolidayRequest } = require("./korean-holiday");
+const {
+  normalizeNhisCheckupQuery,
+  normalizeNhisLongTermCareQuery,
+  proxyNhisCheckupRequest,
+  proxyNhisLongTermCareRequest
+} = require("./nhis-care");
+const { isKopisErrorBody, normalizeKopisDetailQuery, normalizeKopisListQuery, proxyKopisRequest } = require("./kopis");
+const { normalizeKrWhoisDomainQuery, proxyKrWhoisDomainRequest } = require("./kr-whois");
 const AIR_KOREA_UPSTREAM_BASE_URL = "http://apis.data.go.kr";
 const DATA_GO_KR_UPSTREAM_BASE_URL = "https://apis.data.go.kr";
 const DATA4LIBRARY_UPSTREAM_BASE_URL = "https://data4library.kr/api";
@@ -68,7 +86,6 @@ const NEIS_SCHOOL_INFO_URL = "https://open.neis.go.kr/hub/schoolInfo";
 const ALLOWED_AIRKOREA_ROUTES = new Map([
   ["MsrstnInfoInqireSvc", new Set(["getMsrstnList", "getNearbyMsrstnList", "getTMStdrCrdnt"])],
   ["ArpltnInforInqireSvc", new Set(["getMsrstnAcctoRltmMesureDnsty", "getCtprvnRltmMesureDnsty"])],
-  ["UserSportSvc", new Set(["getSvckeyDalyStats"])],
 ]);
 
 function parseInteger(value, fallback) {
@@ -180,6 +197,7 @@ function buildConfig(env = process.env) {
     port: parseInteger(env.KSKILL_PROXY_PORT, 4020),
     proxyName: env.KSKILL_PROXY_NAME || "k-skill-proxy",
     airKoreaApiKey: trimOrNull(env.AIR_KOREA_OPEN_API_KEY),
+    assemblyApiKey: trimOrNull(env.ASSEMBLY_API_KEY ?? env.KSKILL_ASSEMBLY_API_KEY),
     kmaOpenApiKey: trimOrNull(env.KMA_OPEN_API_KEY),
     seoulOpenApiKey: trimOrNull(env.SEOUL_OPEN_API_KEY),
     hrfcoApiKey: trimOrNull(env.HRFCO_OPEN_API_KEY),
@@ -190,6 +208,7 @@ function buildConfig(env = process.env) {
     kakaoRestApiKey: trimOrNull(env.KAKAO_REST_API_KEY),
     keduInfoKey: trimOrNull(env.KEDU_INFO_KEY),
     krxApiKey: trimOrNull(env.KRX_API_KEY),
+    kopisApiKey: trimOrNull(env.KOPIS_API_KEY ?? env.KSKILL_KOPIS_API_KEY),
     kosisApiKey: trimOrNull(env.KOSIS_API_KEY ?? env.KSKILL_KOSIS_API_KEY),
     naverSearchClientId: trimOrNull(env.NAVER_SEARCH_CLIENT_ID ?? env.NAVER_CLIENT_ID),
     naverSearchClientSecret: trimOrNull(env.NAVER_SEARCH_CLIENT_SECRET ?? env.NAVER_CLIENT_SECRET),
@@ -197,8 +216,11 @@ function buildConfig(env = process.env) {
     lawReferer: trimOrNull(env.LAW_REFERER),
     lawUserAgent: trimOrNull(env.LAW_USER_AGENT),
     cacheTtlMs: parseInteger(env.KSKILL_PROXY_CACHE_TTL_MS, 300000),
+    cacheMaxEntries: Math.max(1, parseInteger(env.KSKILL_PROXY_CACHE_MAX_ENTRIES, 1000)),
     rateLimitWindowMs: parseInteger(env.KSKILL_PROXY_RATE_LIMIT_WINDOW_MS, 60000),
-    rateLimitMax: parseInteger(env.KSKILL_PROXY_RATE_LIMIT_MAX, 60)
+    rateLimitMax: parseInteger(env.KSKILL_PROXY_RATE_LIMIT_MAX, 60),
+    rateLimitMaxClients: Math.max(1, parseInteger(env.KSKILL_PROXY_RATE_LIMIT_MAX_CLIENTS, 10000)),
+    trustProxyHops: Math.max(0, parseInteger(env.KSKILL_PROXY_TRUST_PROXY_HOPS, 0))
   };
 }
 
@@ -229,8 +251,25 @@ function isFailureResponse(value) {
   return false;
 }
 
-function createMemoryCache() {
+function createMemoryCache({ maxEntries = 1000, now = Date.now } = {}) {
   const entries = new Map();
+
+  function makeRoom() {
+    if (entries.size < maxEntries) {
+      return;
+    }
+
+    const currentTime = now();
+    for (const [key, entry] of entries) {
+      if (entry.expiresAt <= currentTime) {
+        entries.delete(key);
+      }
+    }
+
+    while (entries.size >= maxEntries) {
+      entries.delete(entries.keys().next().value);
+    }
+  }
 
   return {
     get(key) {
@@ -239,7 +278,7 @@ function createMemoryCache() {
         return null;
       }
 
-      if (cached.expiresAt <= Date.now()) {
+      if (cached.expiresAt <= now()) {
         entries.delete(key);
         return null;
       }
@@ -250,27 +289,47 @@ function createMemoryCache() {
       if (isFailureResponse(value)) {
         return false;
       }
+      makeRoom();
       entries.set(key, {
         value,
-        expiresAt: Date.now() + ttlMs
+        expiresAt: now() + ttlMs
       });
       return true;
     }
   };
 }
 
-function buildRateLimiter(config) {
+function buildRateLimiter(config, { now = Date.now } = {}) {
   const state = new Map();
+
+  function makeRoom(currentTime) {
+    if (state.size < config.rateLimitMaxClients) {
+      return;
+    }
+
+    for (const [key, entry] of state) {
+      if (entry.resetAt <= currentTime) {
+        state.delete(key);
+      }
+    }
+
+    while (state.size >= config.rateLimitMaxClients) {
+      state.delete(state.keys().next().value);
+    }
+  }
 
   return function rateLimit(request, reply) {
     const key = request.ip || "unknown";
-    const now = Date.now();
+    const currentTime = now();
     const current = state.get(key);
 
-    if (!current || current.resetAt <= now) {
+    if (!current || current.resetAt <= currentTime) {
+      if (!current) {
+        makeRoom(currentTime);
+      }
       state.set(key, {
         count: 1,
-        resetAt: now + config.rateLimitWindowMs
+        resetAt: currentTime + config.rateLimitWindowMs
       });
       return true;
     }
@@ -279,7 +338,7 @@ function buildRateLimiter(config) {
       reply.code(429).send({
         error: "rate_limited",
         message: "Too many requests.",
-        retry_after_ms: current.resetAt - now
+        retry_after_ms: current.resetAt - currentTime
       });
       return false;
     }
@@ -1189,6 +1248,19 @@ function isAllowedAirKoreaRoute(service, operation) {
   return ALLOWED_AIRKOREA_ROUTES.get(service)?.has(operation) || false;
 }
 
+function redactSecretValue(text, secret) {
+  let redacted = String(text);
+  const serializedSecret = new URLSearchParams({ serviceKey: String(secret) })
+    .toString()
+    .slice("serviceKey=".length);
+  for (const candidate of [String(secret), encodeURIComponent(String(secret)), serializedSecret]) {
+    if (candidate) {
+      redacted = redacted.split(candidate).join("[REDACTED]");
+    }
+  }
+  return redacted.replace(/serviceKey(?:=|%3D)[^&\s"'<>\\]+/giu, "serviceKey=[REDACTED]");
+}
+
 async function proxyAirKoreaRequest({ service, operation, query, serviceKey, fetchImpl = global.fetch }) {
   if (!serviceKey) {
     return {
@@ -1227,13 +1299,22 @@ async function proxyAirKoreaRequest({ service, operation, query, serviceKey, fet
   }
   url.searchParams.set("serviceKey", serviceKey);
 
-  const response = await fetchImpl(url, {
-    signal: AbortSignal.timeout(20000)
-  });
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      signal: AbortSignal.timeout(20000)
+    });
+  } catch {
+    const error = new Error("AirKorea upstream request failed.");
+    error.statusCode = 502;
+    error.code = "upstream_fetch_failed";
+    throw error;
+  }
+  const body = await response.text();
   return {
     statusCode: response.status,
     contentType: response.headers.get("content-type") || "application/json; charset=utf-8",
-    body: await response.text()
+    body: redactSecretValue(body, serviceKey)
   };
 }
 
@@ -1851,11 +1932,12 @@ function validateHouseholdWastePaginationQuery(query) {
 
 function buildServer({ env = process.env, provider = null, now = () => new Date() } = {}) {
   const config = buildConfig(env);
-  const cache = createMemoryCache();
+  const cache = createMemoryCache({ maxEntries: config.cacheMaxEntries });
   const rateLimit = buildRateLimiter(config);
   const app = Fastify({
     logger: true,
-    disableRequestLogging: true
+    logController: new LogController({ disableRequestLogging: true }),
+    trustProxy: config.trustProxyHops || false
   });
 
   app.decorate("configValues", config);
@@ -1882,6 +1964,7 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
       port: config.port,
       upstreams: {
         airKoreaConfigured: Boolean(config.airKoreaApiKey),
+        assemblyConfigured: Boolean(config.assemblyApiKey),
         kmaOpenApiConfigured: Boolean(config.kmaOpenApiKey),
         seoulOpenApiConfigured: Boolean(config.seoulOpenApiKey),
         hrfcoConfigured: Boolean(config.hrfcoApiKey),
@@ -1892,6 +1975,7 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
         foodsafetyKoreaConfigured: Boolean(config.foodsafetyKoreaApiKey),
         neisSchoolMealConfigured: Boolean(config.keduInfoKey),
         krxConfigured: Boolean(config.krxApiKey),
+        kopisConfigured: Boolean(config.kopisApiKey),
         kakaoLocalConfigured: Boolean(config.kakaoRestApiKey),
         kakaoMapConfigured: Boolean(config.kakaoRestApiKey),
         kakaoMobilityConfigured: Boolean(config.kakaoRestApiKey),
@@ -1901,6 +1985,8 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
         naverNewsApiConfigured: naverSearchKeysPresent,
         ntsBusinessConfigured: Boolean(config.molitApiKey),
         kstartupConfigured: Boolean(config.molitApiKey),
+        nhisCareConfigured: Boolean(config.molitApiKey),
+        nhisCheckupConfigured: Boolean(config.molitApiKey),
         nationalPensionConfigured: Boolean(config.molitApiKey),
         fscCorpConfigured: Boolean(config.molitApiKey),
         g2bSanctionConfigured: Boolean(config.molitApiKey),
@@ -1989,6 +2075,64 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
     cache.set(cacheKey, payload, config.cacheTtlMs);
     return payload;
   });
+
+  async function handleAssemblyRoute({ operation, normalize, cacheRoute, request, reply }) {
+    let normalized;
+
+    try {
+      normalized = normalize(request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return {
+        error: "bad_request",
+        message: error.message
+      };
+    }
+
+    const cacheKey = makeCacheKey({ route: cacheRoute, ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyAssemblyRequest({
+      operation,
+      params: normalized,
+      apiKey: config.assemblyApiKey
+    });
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300 && !isAssemblyErrorBody(upstream.body)) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  }
+
+  app.get("/v1/assembly/bills", async (request, reply) => handleAssemblyRoute({
+    operation: "ALLBILLV2",
+    normalize: normalizeAssemblyBillSearchQuery,
+    cacheRoute: "assembly-bills",
+    request,
+    reply
+  }));
+
+  app.get("/v1/assembly/bill-detail", async (request, reply) => handleAssemblyRoute({
+    operation: "BILLINFODETAIL",
+    normalize: normalizeAssemblyBillDetailQuery,
+    cacheRoute: "assembly-bill-detail",
+    request,
+    reply
+  }));
+
+  app.get("/v1/assembly/votes", async (request, reply) => handleAssemblyRoute({
+    operation: "nojepdqqaweusdfbi",
+    normalize: normalizeAssemblyVoteQuery,
+    cacheRoute: "assembly-votes",
+    request,
+    reply
+  }));
 
   app.get("/v1/seoul-bike/realtime", async (request, reply) => {
     let normalized;
@@ -2485,6 +2629,222 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
     }
 
     return payload;
+  });
+
+  async function handleKopisListRoute({ operation, path, request, reply }) {
+    let normalized;
+
+    try {
+      normalized = normalizeKopisListQuery(request.query || {}, operation);
+    } catch (error) {
+      reply.code(400);
+      return {
+        error: "bad_request",
+        message: error.message
+      };
+    }
+
+    const cacheKey = makeCacheKey({ route: `kopis-${operation}`, ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyKopisRequest({ path, params: normalized, serviceKey: config.kopisApiKey });
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300 && !isKopisErrorBody(upstream.body)) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  }
+
+  app.get("/v1/kopis/performances", async (request, reply) => handleKopisListRoute({
+    operation: "performances",
+    path: "pblprfr",
+    request,
+    reply
+  }));
+
+  app.get("/v1/kopis/facilities", async (request, reply) => handleKopisListRoute({
+    operation: "facilities",
+    path: "prfplc",
+    request,
+    reply
+  }));
+
+  app.get("/v1/kopis/performances/:id", async (request, reply) => {
+    let normalized;
+    try {
+      normalized = normalizeKopisDetailQuery(request.params || {}, "performance id");
+    } catch (error) {
+      reply.code(400);
+      return { error: "bad_request", message: error.message };
+    }
+    const upstream = await proxyKopisRequest({
+      path: `pblprfr/${encodeURIComponent(normalized.id)}`,
+      serviceKey: config.kopisApiKey
+    });
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  });
+
+  app.get("/v1/kopis/facilities/:id", async (request, reply) => {
+    let normalized;
+    try {
+      normalized = normalizeKopisDetailQuery(request.params || {}, "facility id");
+    } catch (error) {
+      reply.code(400);
+      return { error: "bad_request", message: error.message };
+    }
+    const upstream = await proxyKopisRequest({
+      path: `prfplc/${encodeURIComponent(normalized.id)}`,
+      serviceKey: config.kopisApiKey
+    });
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  });
+
+  app.get("/v1/kr-whois/domain", async (request, reply) => {
+    let normalized;
+
+    try {
+      normalized = normalizeKrWhoisDomainQuery(request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return {
+        error: "bad_request",
+        message: error.message
+      };
+    }
+
+    const cacheKey = makeCacheKey({ route: "kr-whois-domain", ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyKrWhoisDomainRequest({
+      params: normalized,
+      serviceKey: config.molitApiKey
+    });
+
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
+
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  });
+
+  app.get("/v1/nhis/long-term-care", async (request, reply) => {
+    let normalized;
+
+    try {
+      normalized = normalizeNhisLongTermCareQuery(request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return {
+        error: "bad_request",
+        message: error.message
+      };
+    }
+
+    const cacheKey = makeCacheKey({ route: "nhis-long-term-care", ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyNhisLongTermCareRequest({
+      params: normalized,
+      serviceKey: config.molitApiKey
+    });
+
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
+
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  });
+
+  app.get("/v1/nhis/checkup/:operation", async (request, reply) => {
+    let normalized;
+
+    try {
+      normalized = normalizeNhisCheckupQuery(request.params.operation, request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return {
+        error: "bad_request",
+        message: error.message
+      };
+    }
+
+    const cacheKey = makeCacheKey({ route: "nhis-checkup", ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyNhisCheckupRequest({
+      params: normalized,
+      serviceKey: config.molitApiKey
+    });
+
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
+
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  });
+
+  app.get("/v1/korean-holiday/calendar", async (request, reply) => {
+    let normalized;
+
+    try {
+      normalized = normalizeKoreanHolidayQuery(request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return {
+        error: "bad_request",
+        message: error.message
+      };
+    }
+
+    const cacheKey = makeCacheKey({ route: "korean-holiday-calendar", ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyKoreanHolidayRequest({
+      params: normalized,
+      serviceKey: config.molitApiKey
+    });
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
   });
 
   app.get("/v1/han-river/water-level", async (request, reply) => {
@@ -5073,11 +5433,15 @@ if (require.main === module) {
 
 module.exports = {
   buildConfig,
+  buildRateLimiter,
   buildServer,
   convertLatLonToKmaGrid,
   createMemoryCache,
   isFailureResponse,
   makeCacheKey,
+  normalizeAssemblyBillDetailQuery,
+  normalizeAssemblyBillSearchQuery,
+  normalizeAssemblyVoteQuery,
   normalizeData4LibraryBookDetailQuery,
   normalizeData4LibraryBookExistsQuery,
   normalizeData4LibraryBookSearchQuery,
@@ -5094,7 +5458,13 @@ module.exports = {
   normalizeKosisDataQuery,
   normalizeKosisMetaQuery,
   normalizeKosisSearchQuery,
+  normalizeKoreanHolidayQuery,
+  normalizeKopisDetailQuery,
+  normalizeKopisListQuery,
   normalizeKstartupQuery,
+  normalizeKrWhoisDomainQuery,
+  normalizeNhisCheckupQuery,
+  normalizeNhisLongTermCareQuery,
   normalizeKoreanStockLookupQuery,
   normalizeKoreanStockSearchQuery,
   normalizeLhNoticeDetailQuery,
@@ -5114,6 +5484,7 @@ module.exports = {
   normalizeSeoulCityDataQuery,
   normalizeSeoulSubwayQuery,
   proxyAirKoreaRequest,
+  proxyAssemblyRequest,
   proxyData4LibraryRequest,
   proxyHrfcoWaterLevelRequest,
   proxyKakaoLocalRequest,
@@ -5121,7 +5492,12 @@ module.exports = {
   proxyNeisSchoolInfoRequest,
   proxyKmaWeatherRequest,
   proxyKosisRequest,
+  proxyKoreanHolidayRequest,
+  proxyKopisRequest,
+  proxyKrWhoisDomainRequest,
   proxyKstartupRequest,
+  proxyNhisCheckupRequest,
+  proxyNhisLongTermCareRequest,
   fetchKakaoLocalEndpoint,
   fetchKakaoMobilityDirections,
   fetchNaverShoppingSearch,

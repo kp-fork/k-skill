@@ -1,3 +1,4 @@
+// allow: SIZE_OK - Cohesive AirKorea station/measurement adapter with one shared fallback and redaction contract.
 const STATION_SERVICE_URL = "http://apis.data.go.kr/B552584/MsrstnInfoInqireSvc";
 const MEASUREMENT_SERVICE_URL = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc";
 const GRADE_LABELS = {
@@ -206,21 +207,27 @@ async function fetchJson(baseUrl, params, { fetchImpl = global.fetch, headers = 
   }
 
   url.search = searchParams.toString();
-  const response = await fetchImpl(url, {
-    headers,
-    signal: AbortSignal.timeout(20000)
-  });
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      headers,
+      signal: AbortSignal.timeout(20000)
+    });
+  } catch {
+    const error = new Error("AirKorea upstream request failed.");
+    error.statusCode = 502;
+    error.code = "upstream_fetch_failed";
+    throw error;
+  }
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-
     if (response.status === 403) {
       throw new Error(
         "AirKorea upstream returned 403 Forbidden. 기술문서 기준 후보 원인: 활용신청 후 동기화 대기(1~2시간), 활용신청하지 않은 API 호출, 서비스키 인코딩/서비스키 오류, 등록하지 않은 도메인 또는 IP.",
       );
     }
 
-    throw new Error(`AirKorea request failed with ${response.status} for ${url}${body ? ` :: ${body.slice(0, 200)}` : ""}`);
+    throw new Error(`AirKorea upstream request failed with HTTP ${response.status}.`);
   }
 
   return JSON.parse(await response.text());

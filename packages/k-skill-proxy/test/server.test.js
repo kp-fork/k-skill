@@ -1,11 +1,15 @@
+// allow: SIZE_OK - Integration suite intentionally validates the assembled proxy across route groups.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
   buildServer,
+  buildRateLimiter,
   createMemoryCache,
   isFailureResponse,
   makeCacheKey,
+  normalizeAssemblyBillSearchQuery,
+  normalizeAssemblyVoteQuery,
   normalizeData4LibraryBookDetailQuery,
   normalizeData4LibraryBookExistsQuery,
   normalizeData4LibraryBookSearchQuery,
@@ -15,7 +19,12 @@ const {
   normalizeKosisDataQuery,
   normalizeKosisMetaQuery,
   normalizeKosisSearchQuery,
+  normalizeKoreanHolidayQuery,
+  normalizeKopisListQuery,
   normalizeKstartupQuery,
+  normalizeKrWhoisDomainQuery,
+  normalizeNhisCheckupQuery,
+  normalizeNhisLongTermCareQuery,
   normalizeNtsBusinessStatusQuery,
   normalizeNtsBusinessValidateQuery,
   proxyAirKoreaRequest,
@@ -78,6 +87,631 @@ test("createMemoryCache refuses to store failure responses", () => {
 
   assert.equal(cache.set("k4", { items: [{ id: 1 }] }, 60000), true);
   assert.deepEqual(cache.get("k4"), { items: [{ id: 1 }] }, "successful payload must be stored");
+});
+
+test("createMemoryCache stays bounded and evicts expired or oldest entries", () => {
+  let currentTime = 1000;
+  const cache = createMemoryCache({ maxEntries: 2, now: () => currentTime });
+
+  cache.set("expired", { value: 1 }, 10);
+  cache.set("fresh", { value: 2 }, 1000);
+  currentTime = 1020;
+  cache.set("next", { value: 3 }, 1000);
+
+  assert.equal(cache.get("expired"), null);
+  assert.deepEqual(cache.get("fresh"), { value: 2 });
+  assert.deepEqual(cache.get("next"), { value: 3 });
+
+  cache.set("last", { value: 4 }, 1000);
+  assert.equal(cache.get("fresh"), null, "oldest live entry should be evicted at capacity");
+  assert.deepEqual(cache.get("next"), { value: 3 });
+  assert.deepEqual(cache.get("last"), { value: 4 });
+});
+
+test("rate limiter bounds tracked client IPs", () => {
+  let currentTime = 1000;
+  const limiter = buildRateLimiter({
+    rateLimitWindowMs: 1000,
+    rateLimitMax: 1,
+    rateLimitMaxClients: 2
+  }, { now: () => currentTime });
+  const reply = { code() { return this; }, send() {} };
+
+  assert.equal(limiter({ ip: "198.51.100.1" }, reply), true);
+  assert.equal(limiter({ ip: "198.51.100.2" }, reply), true);
+  assert.equal(limiter({ ip: "198.51.100.3" }, reply), true);
+  assert.equal(limiter({ ip: "198.51.100.1" }, reply), true, "evicted IP should start a fresh window");
+
+  currentTime = 2500;
+  assert.equal(limiter({ ip: "198.51.100.4" }, reply), true, "expired entries should be removed before eviction");
+});
+
+test("Korean holiday normalizer validates operation and solar year/month", () => {
+  assert.deepEqual(normalizeKoreanHolidayQuery({ type: "rest", year: "2026", month: "7", limit: "20" }), {
+    operation: "rest",
+    solYear: "2026",
+    solMonth: "07",
+    pageNo: 1,
+    numOfRows: 20
+  });
+  assert.deepEqual(normalizeKoreanHolidayQuery({ operation: "solarTerm", solYear: "2026" }), {
+    operation: "solarTerm",
+    solYear: "2026",
+    solMonth: null,
+    pageNo: 1,
+    numOfRows: 100
+  });
+  assert.throws(() => normalizeKoreanHolidayQuery({ year: "26" }), /solYear/);
+  assert.throws(() => normalizeKoreanHolidayQuery({ year: "2026", month: "13" }), /solMonth/);
+  assert.throws(() => normalizeKoreanHolidayQuery({ year: "2026", operation: "unknown" }), /operation/);
+});
+
+test("Korean holiday route injects ServiceKey and caches XML success", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(
+      "<response><header><resultCode>00</resultCode><resultMsg>OK</resultMsg></header><body><items><item><dateName>광복절</dateName><isHoliday>Y</isHoliday><locdate>20260815</locdate></item></items></body></response>",
+      { status: 200, headers: { "content-type": "application/xml;charset=UTF-8" } }
+    );
+  };
+
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "data-go-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const first = await app.inject({ method: "GET", url: "/v1/korean-holiday/calendar?operation=rest&year=2026&month=08" });
+  assert.equal(first.statusCode, 200);
+  assert.match(first.body, /광복절/);
+  assert.match(calls[0], /\/SpcdeInfoService\/getRestDeInfo\?/);
+  assert.match(calls[0], /ServiceKey=data-go-key/);
+  assert.match(calls[0], /solYear=2026/);
+  assert.match(calls[0], /solMonth=08/);
+
+  const second = await app.inject({ method: "GET", url: "/v1/korean-holiday/calendar?operation=rest&year=2026&month=08" });
+  assert.equal(second.statusCode, 200);
+  assert.equal(calls.length, 1);
+});
+
+test("Korean holiday route maps solar-term operation and missing key", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response("<response><body><items /></body></response>", {
+      status: 200,
+      headers: { "content-type": "application/xml;charset=UTF-8" }
+    });
+  };
+
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "data-go-key" } });
+  const missingApp = buildServer({ env: {} });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+    await missingApp.close();
+  });
+
+  assert.equal((await app.inject({ method: "GET", url: "/v1/korean-holiday/calendar?operation=solarTerm&year=2026" })).statusCode, 200);
+  assert.match(calls[0], /get24DivisionsInfo/);
+  const missing = await missingApp.inject({ method: "GET", url: "/v1/korean-holiday/calendar?year=2026" });
+  assert.equal(missing.statusCode, 503);
+  assert.equal(missing.json().error, "upstream_not_configured");
+});
+
+test("Korean holiday route reports rejected upstream key", async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(
+    "<OpenAPI_ServiceResponse><cmmMsgHeader><returnAuthMsg>SERVICE KEY IS NOT REGISTERED ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>",
+    { status: 200, headers: { "content-type": "application/xml" } }
+  );
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "bad-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const rejected = await app.inject({ method: "GET", url: "/v1/korean-holiday/calendar?year=2026" });
+  assert.equal(rejected.statusCode, 502);
+  assert.equal(rejected.json().error, "upstream_forbidden");
+});
+
+test("KR WHOIS domain normalizer accepts only .kr and .한국 domains", () => {
+  assert.deepEqual(normalizeKrWhoisDomainQuery({ domain: "https://KISA.or.kr/path" }), {
+    query: "kisa.or.kr",
+    answer: "json"
+  });
+  assert.deepEqual(normalizeKrWhoisDomainQuery({ q: "예시.한국" }), {
+    query: "예시.한국",
+    answer: "json"
+  });
+
+  assert.throws(() => normalizeKrWhoisDomainQuery({}), /domain/);
+  assert.throws(() => normalizeKrWhoisDomainQuery({ domain: "example.com" }), /\.kr/);
+  assert.throws(() => normalizeKrWhoisDomainQuery({ domain: "bad..or.kr" }), /valid domain/);
+  assert.throws(() => normalizeKrWhoisDomainQuery({ domain: "-bad.or.kr" }), /valid domain/);
+  assert.throws(() => normalizeKrWhoisDomainQuery({ domain: "bad-.or.kr" }), /valid domain/);
+});
+
+test("KR WHOIS domain route injects serviceKey server-side and caches success", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(
+      JSON.stringify({ result_code: "10000", result_msg: "정상 응답 입니다.", name: "kisa.or.kr" }),
+      { status: 200, headers: { "content-type": "application/json;charset=UTF-8" } }
+    );
+  };
+
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "data-go-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const first = await app.inject({ method: "GET", url: "/v1/kr-whois/domain?domain=kisa.or.kr" });
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.json().name, "kisa.or.kr");
+  assert.match(calls[0], /\/B551505\/whois\/domain_name\?/);
+  assert.match(calls[0], /serviceKey=data-go-key/);
+  assert.match(calls[0], /query=kisa\.or\.kr/);
+  assert.match(calls[0], /answer=json/);
+
+  const second = await app.inject({ method: "GET", url: "/v1/kr-whois/domain?domain=kisa.or.kr" });
+  assert.equal(second.statusCode, 200);
+  assert.equal(calls.length, 1, "second request must be served from cache");
+});
+
+test("KR WHOIS domain route reports missing and rejected upstream key", async (t) => {
+  const app = buildServer({ env: {} });
+  t.after(async () => {
+    await app.close();
+  });
+
+  const missing = await app.inject({ method: "GET", url: "/v1/kr-whois/domain?domain=kisa.or.kr" });
+  assert.equal(missing.statusCode, 503);
+  assert.equal(missing.json().error, "upstream_not_configured");
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(
+    "<OpenAPI_ServiceResponse><cmmMsgHeader><returnAuthMsg>SERVICE KEY IS NOT REGISTERED ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>",
+    { status: 200, headers: { "content-type": "application/xml" } }
+  );
+  const rejectedApp = buildServer({ env: { DATA_GO_KR_API_KEY: "bad-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await rejectedApp.close();
+  });
+
+  const rejected = await rejectedApp.inject({ method: "GET", url: "/v1/kr-whois/domain?domain=kisa.or.kr" });
+  assert.equal(rejected.statusCode, 502);
+  assert.equal(rejected.json().error, "upstream_forbidden");
+});
+
+test("NHIS long-term care normalizer validates bounded search params", () => {
+  assert.deepEqual(
+    normalizeNhisLongTermCareQuery({
+      q: "강남",
+      sido: "11",
+      sigungu: "11680",
+      service_kind: "1",
+      page: "2",
+      limit: "20"
+    }),
+    {
+      adminNm: "강남",
+      siDoCd: "11",
+      siGunGuCd: "11680",
+      serviceKind: "1",
+      pageNo: 2,
+      numOfRows: 20
+    }
+  );
+
+  assert.throws(() => normalizeNhisLongTermCareQuery({}), /adminNm/);
+  assert.throws(() => normalizeNhisLongTermCareQuery({ sido: "서울" }), /siDoCd/);
+  assert.throws(() => normalizeNhisLongTermCareQuery({ q: "강남", limit: "101" }), /numOfRows/);
+});
+
+test("NHIS checkup normalizer validates search params and operation aliases", () => {
+  assert.deepEqual(
+    normalizeNhisCheckupQuery("by-region", {
+      q: "검진",
+      sido: "11",
+      sigungu: "11680",
+      page: "2",
+      limit: "20"
+    }),
+    {
+      operation: "by-region",
+      upstreamOperation: "getRegnHmcList",
+      hmcNm: "검진",
+      siDoCd: "11",
+      siGunGuCd: "11680",
+      hchkTypeCd: null,
+      pageNo: 2,
+      numOfRows: 20
+    }
+  );
+
+  assert.equal(
+    normalizeNhisCheckupQuery("holiday", { hmc_nm: "주말", limit: "5" }).upstreamOperation,
+    "getHolidaysHmcList"
+  );
+  assert.equal(
+    normalizeNhisCheckupQuery("by-checkup-type", { sido: "11", hchk_type: "1" }).upstreamOperation,
+    "getHchkTypesHmcList"
+  );
+  assert.equal(
+    normalizeNhisCheckupQuery("list", { hmc_nm: "검진" }).upstreamOperation,
+    "getHmcList"
+  );
+
+  assert.throws(() => normalizeNhisCheckupQuery("unknown", { q: "검진" }), /operation/);
+  assert.throws(() => normalizeNhisCheckupQuery("by-region", {}), /hmcNm/);
+  assert.throws(() => normalizeNhisCheckupQuery("by-region", { sido: "서울" }), /siDoCd/);
+  assert.throws(() => normalizeNhisCheckupQuery("by-checkup-type", { sido: "11", hchk_type: "암" }), /hchkTypeCd/);
+});
+
+test("NHIS checkup route injects serviceKey and caches XML success", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(
+      "<response><header><resultCode>00</resultCode><resultMsg>OK</resultMsg></header><body><items><item><hmcNm>강남검진센터</hmcNm></item></items></body></response>",
+      { status: 200, headers: { "content-type": "application/xml;charset=UTF-8" } }
+    );
+  };
+
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "data-go-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const url = "/v1/nhis/checkup/by-region?q=%EA%B2%80%EC%A7%84&sido=11&sigungu=11680&limit=5";
+  const first = await app.inject({ method: "GET", url });
+  assert.equal(first.statusCode, 200);
+  assert.match(first.body, /강남검진센터/);
+  assert.match(calls[0], /HmcSearchService\/getRegnHmcList/);
+  assert.match(calls[0], /serviceKey=data-go-key/);
+  assert.match(calls[0], /hmcNm=%EA%B2%80%EC%A7%84/);
+  assert.match(calls[0], /siDoCd=11/);
+  assert.match(calls[0], /siGunGuCd=11680/);
+  assert.match(calls[0], /numOfRows=5/);
+
+  const second = await app.inject({ method: "GET", url });
+  assert.equal(second.statusCode, 200);
+  assert.equal(calls.length, 1, "second request must be served from cache");
+});
+
+test("NHIS checkup route reports missing and rejected upstream key", async (t) => {
+  const app = buildServer({ env: {} });
+  t.after(async () => {
+    await app.close();
+  });
+
+  const missing = await app.inject({ method: "GET", url: "/v1/nhis/checkup/holiday?q=%EC%A3%BC%EB%A7%90" });
+  assert.equal(missing.statusCode, 503);
+  assert.equal(missing.json().error, "upstream_not_configured");
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(
+    "<OpenAPI_ServiceResponse><cmmMsgHeader><returnAuthMsg>SERVICE KEY IS NOT REGISTERED ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>",
+    { status: 200, headers: { "content-type": "application/xml" } }
+  );
+  const rejectedApp = buildServer({ env: { DATA_GO_KR_API_KEY: "bad-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await rejectedApp.close();
+  });
+
+  const rejected = await rejectedApp.inject({ method: "GET", url: "/v1/nhis/checkup/by-checkup-type?sido=11&hchk_type=1" });
+  assert.equal(rejected.statusCode, 502);
+  assert.equal(rejected.json().error, "upstream_forbidden");
+});
+
+test("NHIS checkup route maps HTTP auth rejection to upstream_forbidden", async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(
+    "Unauthorized",
+    { status: 401, headers: { "content-type": "text/plain; charset=utf-8" } }
+  );
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "bad-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const rejected = await app.inject({ method: "GET", url: "/v1/nhis/checkup/list?q=%EA%B2%80%EC%A7%84" });
+  assert.equal(rejected.statusCode, 502);
+  assert.equal(rejected.json().error, "upstream_forbidden");
+});
+
+test("NHIS long-term care route injects serviceKey and caches XML success", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(
+      "<response><header><resultCode>00</resultCode><resultMsg>OK</resultMsg></header><body><items><item><adminNm>강남요양원</adminNm></item></items></body></response>",
+      { status: 200, headers: { "content-type": "application/xml;charset=UTF-8" } }
+    );
+  };
+
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "data-go-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const first = await app.inject({ method: "GET", url: "/v1/nhis/long-term-care?q=%EA%B0%95%EB%82%A8&sido=11&limit=5" });
+  assert.equal(first.statusCode, 200);
+  assert.match(first.body, /강남요양원/);
+  assert.match(calls[0], /getBillGreentInsttSearchList02/);
+  assert.match(calls[0], /serviceKey=data-go-key/);
+  assert.match(calls[0], /adminNm=%EA%B0%95%EB%82%A8/);
+  assert.match(calls[0], /siDoCd=11/);
+  assert.match(calls[0], /numOfRows=5/);
+
+  const second = await app.inject({ method: "GET", url: "/v1/nhis/long-term-care?q=%EA%B0%95%EB%82%A8&sido=11&limit=5" });
+  assert.equal(second.statusCode, 200);
+  assert.equal(calls.length, 1, "second request must be served from cache");
+});
+
+test("NHIS long-term care route reports missing and rejected upstream key", async (t) => {
+  const app = buildServer({ env: {} });
+  t.after(async () => {
+    await app.close();
+  });
+
+  const missing = await app.inject({ method: "GET", url: "/v1/nhis/long-term-care?q=%EA%B0%95%EB%82%A8" });
+  assert.equal(missing.statusCode, 503);
+  assert.equal(missing.json().error, "upstream_not_configured");
+
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(
+    "<OpenAPI_ServiceResponse><cmmMsgHeader><returnAuthMsg>SERVICE KEY IS NOT REGISTERED ERROR</returnAuthMsg></cmmMsgHeader></OpenAPI_ServiceResponse>",
+    { status: 200, headers: { "content-type": "application/xml" } }
+  );
+  const rejectedApp = buildServer({ env: { DATA_GO_KR_API_KEY: "bad-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await rejectedApp.close();
+  });
+
+  const rejected = await rejectedApp.inject({ method: "GET", url: "/v1/nhis/long-term-care?q=%EA%B0%95%EB%82%A8" });
+  assert.equal(rejected.statusCode, 502);
+  assert.equal(rejected.json().error, "upstream_forbidden");
+});
+
+test("Assembly bill and vote normalizers validate required public params", () => {
+  assert.deepEqual(
+    normalizeAssemblyBillSearchQuery({ query: "간호법", page: "2", limit: "20" }),
+    {
+      Type: "json",
+      pIndex: 2,
+      pSize: 20,
+      ERACO: "제21대",
+      BILL_NM: "간호법"
+    }
+  );
+  assert.deepEqual(
+    normalizeAssemblyVoteQuery({ age: "21", billId: "PRC_TEST", memberName: "홍길동", voteResult: "찬성" }),
+    {
+      Type: "json",
+      pIndex: 1,
+      pSize: 10,
+      AGE: "21",
+      BILL_ID: "PRC_TEST",
+      HG_NM: "홍길동",
+      RESULT_VOTE_MOD: "찬성"
+    }
+  );
+  assert.throws(() => normalizeAssemblyVoteQuery({ billId: "PRC_TEST" }), /age/);
+  assert.throws(() => normalizeAssemblyVoteQuery({ age: "제21대", billId: "PRC_TEST" }), /valid age/);
+  assert.throws(() => normalizeAssemblyBillSearchQuery({ limit: "1001" }), /pSize/);
+});
+
+test("Assembly routes inject KEY server-side and cache successful responses", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(
+      JSON.stringify({ ALLBILLV2: [{ head: [{ list_total_count: 1 }] }, { row: [{ BILL_NM: "간호법" }] }] }),
+      { status: 200, headers: { "content-type": "application/json;charset=UTF-8" } }
+    );
+  };
+
+  const app = buildServer({ env: { ASSEMBLY_API_KEY: "assembly-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const first = await app.inject({ method: "GET", url: "/v1/assembly/bills?query=%EA%B0%84%ED%98%B8%EB%B2%95&limit=5" });
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.json().ALLBILLV2[1].row[0].BILL_NM, "간호법");
+  assert.match(calls[0], /\/portal\/openapi\/ALLBILLV2\?/);
+  assert.match(calls[0], /KEY=assembly-key/);
+  assert.match(calls[0], /Type=json/);
+  assert.match(calls[0], /BILL_NM=%EA%B0%84%ED%98%B8%EB%B2%95/);
+  assert.match(calls[0], /pSize=5/);
+
+  const second = await app.inject({ method: "GET", url: "/v1/assembly/bills?query=%EA%B0%84%ED%98%B8%EB%B2%95&limit=5" });
+  assert.equal(second.statusCode, 200);
+  assert.equal(calls.length, 1);
+});
+
+test("Assembly bill detail and votes route to documented operations", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify({ RESULT: { CODE: "INFO-000", MESSAGE: "정상 처리되었습니다." } }), {
+      status: 200,
+      headers: { "content-type": "application/json;charset=UTF-8" }
+    });
+  };
+
+  const app = buildServer({ env: { KSKILL_ASSEMBLY_API_KEY: "assembly-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  assert.equal((await app.inject({ method: "GET", url: "/v1/assembly/bill-detail?billId=000016" })).statusCode, 200);
+  assert.equal((await app.inject({ method: "GET", url: "/v1/assembly/votes?age=21&billId=PRC_TEST&memberName=%ED%99%8D%EA%B8%B8%EB%8F%99" })).statusCode, 200);
+  assert.match(calls[0], /\/portal\/openapi\/BILLINFODETAIL\?/);
+  assert.match(calls[0], /BILL_ID=000016/);
+  assert.match(calls[1], /\/portal\/openapi\/nojepdqqaweusdfbi\?/);
+  assert.match(calls[1], /AGE=21/);
+  assert.match(calls[1], /HG_NM=%ED%99%8D%EA%B8%B8%EB%8F%99/);
+});
+
+test("Assembly routes report missing API key", async (t) => {
+  const app = buildServer({ env: {} });
+  t.after(async () => {
+    await app.close();
+  });
+
+  const response = await app.inject({ method: "GET", url: "/v1/assembly/bills?query=%EA%B0%84%ED%98%B8%EB%B2%95" });
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().error, "upstream_not_configured");
+});
+
+test("KOPIS performance list normalizer validates dates and aliases", () => {
+  assert.deepEqual(
+    normalizeKopisListQuery({
+      start: "2026-01-01",
+      end: "2026-01-31",
+      page: "2",
+      limit: "20",
+      genre: "AAAA",
+      areaCode: "11"
+    }, "performances"),
+    {
+      cpage: 2,
+      rows: 20,
+      stdate: "20260101",
+      eddate: "20260131",
+      shcate: "AAAA",
+      signgucode: "11"
+    }
+  );
+  assert.throws(() => normalizeKopisListQuery({ end: "20260131" }, "performances"), /stdate/);
+  assert.throws(() => normalizeKopisListQuery({ start: "20260201", end: "20260131" }, "performances"), /<=/);
+  assert.throws(() => normalizeKopisListQuery({ start: "20260101", end: "20260131", rows: "101" }, "performances"), /rows/);
+});
+
+test("KOPIS routes inject service key and cache list responses", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response("<dbs><db><mt20id>PF1</mt20id><prfnm>햄릿</prfnm></db></dbs>", {
+      status: 200,
+      headers: { "content-type": "application/xml;charset=UTF-8" }
+    });
+  };
+
+  const app = buildServer({ env: { KOPIS_API_KEY: "kopis-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const first = await app.inject({ method: "GET", url: "/v1/kopis/performances?start=20260101&end=20260131&limit=5" });
+  assert.equal(first.statusCode, 200);
+  assert.match(first.body, /햄릿/);
+  assert.match(calls[0], /\/openApi\/restful\/pblprfr\?/);
+  assert.match(calls[0], /service=kopis-key/);
+  assert.match(calls[0], /stdate=20260101/);
+  assert.match(calls[0], /eddate=20260131/);
+  assert.match(calls[0], /rows=5/);
+
+  const second = await app.inject({ method: "GET", url: "/v1/kopis/performances?start=20260101&end=20260131&limit=5" });
+  assert.equal(second.statusCode, 200);
+  assert.equal(calls.length, 1);
+});
+
+test("Assembly and KOPIS semantic errors are not cached so retries self-heal", async (t) => {
+  const originalFetch = global.fetch;
+  let assemblyCalls = 0;
+  let kopisCalls = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes("open.assembly.go.kr")) {
+      assemblyCalls += 1;
+      const body = assemblyCalls === 1
+        ? JSON.stringify({ RESULT: { CODE: "ERROR-300", MESSAGE: "KEY ERROR" } })
+        : JSON.stringify({ ALLBILLV2: [{ head: [{ list_total_count: 1 }, { RESULT: { CODE: "INFO-000", MESSAGE: "OK" } }] }, { row: [{ BILL_ID: "B1" }] }] });
+      return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+    }
+    kopisCalls += 1;
+    const body = kopisCalls === 1
+      ? "<error><code>01</code><msg>SERVICE ERROR</msg></error>"
+      : "<dbs><db><mt20id>PF1</mt20id><prfnm>햄릿</prfnm></db></dbs>";
+    return new Response(body, { status: 200, headers: { "content-type": "application/xml" } });
+  };
+
+  const app = buildServer({ env: { ASSEMBLY_API_KEY: "assembly-key", KOPIS_API_KEY: "kopis-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const assemblyUrl = "/v1/assembly/bills?query=%EA%B0%84%ED%98%B8%EB%B2%95";
+  assert.equal((await app.inject({ method: "GET", url: assemblyUrl })).statusCode, 200);
+  assert.match((await app.inject({ method: "GET", url: assemblyUrl })).body, /B1/);
+  assert.equal(assemblyCalls, 2, "Assembly semantic errors must not be cached");
+
+  const kopisUrl = "/v1/kopis/performances?start=20260101&end=20260131&limit=5";
+  assert.equal((await app.inject({ method: "GET", url: kopisUrl })).statusCode, 200);
+  assert.match((await app.inject({ method: "GET", url: kopisUrl })).body, /PF1/);
+  assert.equal(kopisCalls, 2, "KOPIS semantic errors must not be cached");
+});
+
+test("KOPIS detail and facility routes preserve narrow upstream paths", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response("<dbs><db><id>ok</id></db></dbs>", {
+      status: 200,
+      headers: { "content-type": "application/xml;charset=UTF-8" }
+    });
+  };
+
+  const app = buildServer({ env: { KSKILL_KOPIS_API_KEY: "kopis-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  assert.equal((await app.inject({ method: "GET", url: "/v1/kopis/facilities?q=%EC%84%B8%EC%A2%85&limit=3" })).statusCode, 200);
+  assert.equal((await app.inject({ method: "GET", url: "/v1/kopis/performances/PF132236" })).statusCode, 200);
+  assert.equal((await app.inject({ method: "GET", url: "/v1/kopis/facilities/FC001247" })).statusCode, 200);
+  assert.match(calls[0], /\/openApi\/restful\/prfplc\?/);
+  assert.match(calls[0], /shprfnmfct=%EC%84%B8%EC%A2%85/);
+  assert.match(calls[1], /\/openApi\/restful\/pblprfr\/PF132236\?service=kopis-key/);
+  assert.match(calls[2], /\/openApi\/restful\/prfplc\/FC001247\?service=kopis-key/);
+});
+
+test("KOPIS routes report missing API key", async (t) => {
+  const app = buildServer({ env: {} });
+  t.after(async () => {
+    await app.close();
+  });
+
+  const response = await app.inject({ method: "GET", url: "/v1/kopis/performances?start=20260101&end=20260131" });
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().error, "upstream_not_configured");
 });
 
 test("food-safety search does not cache upstream failures so transient errors self-heal", async (t) => {
@@ -1275,6 +1909,36 @@ test("korean stock search rate limit does not trust spoofed cf-connecting-ip on 
   assert.equal(second.json().error, "rate_limited");
 });
 
+test("rate limit separates Cloud Run clients behind two trusted proxy hops", async (t) => {
+  const app = buildServer({
+    env: {
+      KSKILL_PROXY_RATE_LIMIT_MAX: "1",
+      KSKILL_PROXY_TRUST_PROXY_HOPS: "2"
+    }
+  });
+
+  t.after(async () => {
+    await app.close();
+  });
+
+  const request = (clientIp) => app.inject({
+    method: "GET",
+    url: "/v1/korean-stock/search?q=%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90&bas_dd=20260404",
+    headers: {
+      "x-forwarded-for": `203.0.113.200, ${clientIp}, 35.191.0.1`
+    }
+  });
+
+  const firstClient = await request("198.51.100.10");
+  const secondClient = await request("198.51.100.11");
+  const firstClientAgain = await request("198.51.100.10");
+
+  assert.equal(firstClient.statusCode, 503);
+  assert.equal(secondClient.statusCode, 503);
+  assert.equal(firstClientAgain.statusCode, 429);
+  assert.equal(firstClientAgain.json().error, "rate_limited");
+});
+
 test("korean stock search surfaces degraded upstream metadata when another market fails", async (t) => {
   const originalFetch = global.fetch;
   const fetchCalls = [];
@@ -1928,6 +2592,54 @@ test("proxyAirKoreaRequest injects serviceKey and preserves caller query params"
   assert.match(calledUrl, /serviceKey=test-service-key/);
 });
 
+test("proxyAirKoreaRequest redacts service keys echoed with URLSearchParams encoding", async () => {
+  for (const serviceKey of ["fake~secret", "fake secret", "fake!secret", "airkorea-secret+/="]) {
+    const serialized = new URLSearchParams({ serviceKey }).toString();
+    const result = await proxyAirKoreaRequest({
+      service: "ArpltnInforInqireSvc",
+      operation: "getMsrstnAcctoRltmMesureDnsty",
+      query: { returnType: "json", stationName: "강남구" },
+      serviceKey,
+      fetchImpl: async () => new Response(
+        `failed ${serialized}`,
+        { status: 500, headers: { "content-type": "text/plain" } }
+      )
+    });
+
+    assert.equal(result.statusCode, 500);
+    assert.doesNotMatch(result.body, /fake|airkorea-secret|serviceKey=(?!\[REDACTED\])/);
+    assert.match(result.body, /serviceKey=\[REDACTED\]/);
+  }
+});
+
+test("AirKorea fetch rejections do not expose credential-bearing URLs", async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    throw new Error(`boom ${url}`);
+  };
+
+  const app = buildServer({
+    env: {
+      AIR_KOREA_OPEN_API_KEY: "airkorea-secret+/="
+    }
+  });
+
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  for (const url of [
+    "/B552584/ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty?returnType=json&stationName=%EA%B0%95%EB%82%A8%EA%B5%AC",
+    "/v1/fine-dust/report?stationName=%EA%B0%95%EB%82%A8%EA%B5%AC"
+  ]) {
+    const response = await app.inject({ method: "GET", url });
+    assert.equal(response.statusCode, 502);
+    assert.equal(response.json().error, "upstream_fetch_failed");
+    assert.doesNotMatch(response.body, /airkorea-secret|serviceKey=/);
+  }
+});
+
 test("public AirKorea passthrough route forwards allowed upstream responses", async (t) => {
   const originalFetch = global.fetch;
   global.fetch = async () =>
@@ -1954,6 +2666,52 @@ test("public AirKorea passthrough route forwards allowed upstream responses", as
 
   assert.equal(response.statusCode, 200);
   assert.match(response.body, /resultCode/);
+});
+
+test("public AirKorea passthrough does not expose service-key usage statistics", async (t) => {
+  const app = buildServer({
+    env: {
+      AIR_KOREA_OPEN_API_KEY: "airkorea-key"
+    }
+  });
+
+  t.after(async () => {
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/B552584/UserSportSvc/getSvckeyDalyStats?returnType=json"
+  });
+
+  assert.equal(response.statusCode, 404);
+  assert.equal(response.json().error, "not_found");
+});
+
+test("fine dust upstream failures do not expose the AirKorea service key", async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response("failed serviceKey=airkorea-secret", { status: 500 });
+
+  const app = buildServer({
+    env: {
+      AIR_KOREA_OPEN_API_KEY: "airkorea-secret"
+    }
+  });
+
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/fine-dust/report?stationName=%EA%B0%95%EB%82%A8%EA%B5%AC"
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.doesNotMatch(response.body, /airkorea-secret/);
+  assert.doesNotMatch(response.body, /serviceKey=/);
+  assert.match(response.json().message, /HTTP 500/);
 });
 
 test("seoul subway endpoint caches successful upstream responses for normalized queries", async (t) => {

@@ -5,6 +5,7 @@ const {
   D2B_HOME_URL,
   buildAsideSearchScript,
   buildPlaywrightSearchScript,
+  classifyUpstreamHtml,
   normalizeSearchOptions,
   parseBrowserSearchOutput,
   parseNoticeListText
@@ -60,6 +61,48 @@ test("Given production capacity deadline When parsing Then registration deadline
   assert.equal(result.items[0].production_capacity_due_at, "2026-07-05 17:00")
   assert.equal(result.items[0].registration_due_at, "2026-07-08 11:00")
   assert.equal(result.items[0].bid_due_at, "2026-07-09 10:30")
+})
+
+test("Given mixed D2B bid categories When parsing Then each visible row stays isolated", () => {
+  const visibleText = `
+  * 총 2 건
+  5 물품 경쟁입찰 긴급공고 2026-07-03 2026SCF063526548-01 2026SCF26548 26548
+  (긴급) 마린 기어 조립품 1종 해군군수사령부 해당없음 2026-07-08 14:00 2026-07-09 10:00 제한경쟁 전자입찰 7,745,000
+  6 물품 공개수의 - 2026-07-03 LKF0052-1 2026LKF27065 27065
+  병영식당 취사기구(냉동고 등 11개 품목) 구매 제50보병사단 해당없음 해당없음 수의계약 전자입찰 20,205,000
+  순번 업무구분 입찰구분
+  `
+
+  const result = parseNoticeListText(visibleText)
+
+  assert.equal(result.items.length, 2)
+  assert.equal(result.items[0].base_price_status, "7,745,000")
+  assert.equal(result.items[1].sequence, 6)
+  assert.equal(result.items[1].bid_category, "공개수의")
+  assert.equal(result.items[1].title, "병영식당 취사기구(냉동고 등 11개 품목) 구매")
+  assert.equal(result.items[1].registration_due_at, null)
+  assert.equal(result.items[1].bid_due_at, null)
+  assert.equal(result.items[1].contract_method, "수의계약")
+  assert.equal(result.items[1].bid_form, "전자입찰")
+  assert.equal(result.items[1].base_price_status, "20,205,000")
+})
+
+test("Given public D2B index text with login navigation When classifying Then it is not blocked", () => {
+  const html = `
+  <html>
+    <body>
+      <nav>통합검색 입찰공고 개찰결과 사용자등록 로그인</nav>
+      <main>오늘의 입찰공고 경쟁입찰 공고건명 발주기관 검색 통신보안 경고용 스티커 제조 국세청 시스템 점검 안내</main>
+    </body>
+  </html>`
+
+  assert.deepEqual(classifyUpstreamHtml(html), { status: "ok", reason: "" })
+})
+
+test("Given D2B security or bad-request page When classifying Then it is blocked", () => {
+  const html = "<html><body>400 Bad Request deceptive request routing TouchEn 보안 프로그램 오류 접근 차단 로그인 후 이용하십시오</body></html>"
+
+  assert.equal(classifyUpstreamHtml(html).status, "blocked")
 })
 
 test("Given Korean aliases When normalizing options Then D2B control values are returned", () => {

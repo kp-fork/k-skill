@@ -144,11 +144,11 @@ npm에 배포하려면 `.changeset/` 파일을 추가한다 (`docs/releasing.md`
 
 upstream API 키를 사용자에게 노출하지 않으려면 `k-skill-proxy`를 경유한다.
 
-1. `packages/k-skill-proxy/src/server.js`에 새 route 추가
+1. `packages/k-skill-proxy/src/server.js`에 새 read-only route 추가
 2. `SKILL.md` Workflow에 `curl $KSKILL_PROXY_BASE_URL/v1/...` 형태로 호출 작성
-3. upstream API 키는 서버의 `~/.config/k-skill/secrets.env`에만 보관
+3. upstream API 키는 GCP Secret Manager에 보관하고 Cloud Run runtime에 주입한다
 
-프록시 route 변경은 `main`에 merge된 뒤에도 자동으로 프로덕션 배포되지 않는다. 프로덕션 반영은 gpu01에서 host-configured deploy SHA/ref를 의도적으로 승격하고 cron 배포가 통과해야 한다 (`AGENTS.md`, `docs/deploy-k-skill-proxy.md` 참고).
+프록시 route 변경은 `main`에 merge되면 GitHub Actions를 통해 Cloud Run 프로덕션에 자동 배포된다 (`AGENTS.md`, `docs/deploy-k-skill-proxy.md` 참고).
 
 ### D. Python 스크립트 스킬
 
@@ -188,6 +188,20 @@ upstream API 키를 사용자에게 노출하지 않으려면 `k-skill-proxy`를
 
 ---
 
+## 브라우저가 필요한 스킬: k-skill-browser-runtime
+
+로그인된 브라우저 세션이나 렌더링 의존 화면이 필요한 스킬은 `k-skill-browser-runtime`을 기본 런타임으로 쓴다 ([브라우저 런타임 문서](browser-runtime.md) 참고).
+
+1. **런타임을 선호한다**: 인라인 CDP/Playwright 연결 로직을 새로 짜지 말고 런타임의 `connect()`/`runJob()`과 typed stop rule을 쓴다.
+2. **semver 의존성**: `package.json`의 `dependencies`는 `"k-skill-browser-runtime": "^0.1.0"` 처럼 semver로 고정한다. `workspace:` 프로토콜은 npm publish를 깨뜨리므로 쓰지 않는다.
+3. **typed stop rule 노출**: 인증·CAPTCHA·결제·전자서명·되돌릴 수 없는 제출 경계에서 멈추고 수동 handoff로 넘긴다. 런타임이 BrowserOS를 launch하거나 headless로 띄우지 않는다.
+4. **사이트별 로직은 스킬 안에**: navigation, selector, 파싱, fallback 순서는 각 스킬의 `SKILL.md`와 패키지 코드에 좁고 명확하게 기록한다.
+5. **공개/직접 HTTP 우선**: 브라우저 없이 잡히는 공개 endpoint(RSS/sitemap/공개 JSON/문서화된 API)를 먼저 쓰고, 브라우저는 로그인이 필요한 화면이나 렌더링 의존 화면에만 쓴다.
+
+기본 환경변수: `KSKILL_BROWSER_PROVIDER`(기본 `auto` — BrowserOS → Aside Browser → Chrome CDP), `KSKILL_BROWSEROS_CDP_URL`(기본 `http://127.0.0.1:9100`), `KSKILL_CHROME_CDP_URL`(기본 `http://127.0.0.1:9222`), `KSKILL_ASIDE_COMMAND`(기본 `aside`). Aside는 공개 `aside repl` 표면만 쓰고 비공개 CDP/daemon port에 의존하지 않는다. CAPTCHA/로그인/결제/전자서명/되돌릴 수 없는 제출 자동화 우회는 하지 않는다.
+
+---
+
 ## 스킬 등록 & 검증
 
 스킬은 **별도 레지스트리 없이 디렉토리 스캔으로 자동 발견**된다.
@@ -214,8 +228,8 @@ npm run ci
 
 1. 이미 환경변수에 있으면 → 그대로 사용
 2. 에이전트 vault(1Password, Bitwarden, macOS Keychain) → 주입
-3. `~/.config/k-skill/secrets.env` → 파일에서 읽기
-4. 아무것도 없으면 → 사용자에게 물어보고 3번에 저장
+3. 개인 dotenv 파일 → 파일에서 읽기
+4. 아무것도 없으면 → 사용자에게 물어보고 개인 dotenv 파일에 저장
 
 시크릿 변수 이름 규칙: `KSKILL_<서비스명>_<항목>` (예: `KSKILL_SRT_ID`)
 
@@ -235,10 +249,11 @@ npm run ci
 - [ ] `npm run ci` 통과 (`./scripts/validate-skills.sh` 포함)
 - [ ] npm 패키지라면 `packages/`에 구현체와 테스트 추가
 - [ ] npm 패키지라면 `.changeset/*.md` 파일 추가 (반드시 **기능 PR에서**, Version Packages PR에서 추가하지 말 것)
-- [ ] 프록시 경유라면 `k-skill-proxy/src/server.js`에 route 추가, `main` merge, gpu01 deploy SHA/ref 승격 절차 확인
+- [ ] 프록시 경유라면 `k-skill-proxy/src/server.js`에 route 추가하고 `main` merge 시 Cloud Run workflow/Secret Manager 구성이 맞는지 확인
 - [ ] 크롤링/검색 스킬이라면 공개 접근 경로, fallback 순서, 차단/로그인/빈 결과 실패 모드 문서화
 - [ ] 시크릿이 있다면 `KSKILL_` 접두사 규칙 준수 및 `docs/setup.md` 업데이트
 - [ ] `docs/features/my-new-skill.md` 작성 (선택, 상세 가이드)
+- [ ] 브라우저가 필요한 스킬이라면 `k-skill-browser-runtime` semver 의존성, typed stop rule, 직접 HTTP 우선, `workspace:` 미사용 확인 ([브라우저 런타임 문서](browser-runtime.md))
 
 ---
 
@@ -247,3 +262,4 @@ npm run ci
 - [공통 설정 가이드](setup.md) — 시크릿 설정 방법
 - [릴리스와 자동 배포](releasing.md) — npm 패키지 배포 흐름
 - [보안/시크릿 정책](security-and-secrets.md) — 인증 정보 취급 원칙
+- [브라우저 런타임](browser-runtime.md) — BrowserOS CDP 런타임과 stop rule

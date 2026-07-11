@@ -6,7 +6,19 @@ const { fixtures, withMockedBrowserModule } = require("./helpers");
 
 const { genericHtml, loginHtml, trainingInfoHtml } = fixtures;
 
-test("inspectPage navigates with the resolved target URL and closes the mocked CDP connection", async () => {
+async function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+test("inspectPage navigates with the resolved target URL and releases the CDP client", async () => {
   const state = { closed: false, gotoUrl: null };
 
   await withMockedBrowserModule(
@@ -39,7 +51,7 @@ test("inspectPage navigates with the resolved target URL and closes the mocked C
   );
 });
 
-test("fetchTrainingInfo navigates straight to TRAINING_INFO_URL, parses it, and closes the mocked connection", async () => {
+test("fetchTrainingInfo navigates straight to TRAINING_INFO_URL, parses it, and releases the CDP client", async () => {
   const state = { closed: false, gotoUrl: null };
 
   await withMockedBrowserModule(
@@ -67,6 +79,45 @@ test("fetchTrainingInfo navigates straight to TRAINING_INFO_URL, parses it, and 
       assert.equal(result.comparison.year, "2026");
     },
   );
+});
+
+test("fetchTrainingInfo resolves parsed data when BrowserOS disconnect never settles", async () => {
+  const state = { disconnectCalled: false, gotoUrl: null };
+  const page = {
+    async goto(url) {
+      state.gotoUrl = url;
+    },
+    async content() {
+      return trainingInfoHtml;
+    },
+    url() {
+      return TRAINING_INFO_URL;
+    },
+  };
+  const context = { pages() { return [page]; } };
+  const browser = {
+    contexts() {
+      return [context];
+    },
+    disconnect() {
+      state.disconnectCalled = true;
+      return new Promise(() => {});
+    },
+  };
+
+  const result = await withTimeout(
+    withMockedBrowserModule(
+      () => ({ chromium: { async connectOverCDP() { return browser; } } }),
+      async ({ fetchTrainingInfo }) => fetchTrainingInfo({ connectLoader: async () => browser }),
+    ),
+    300,
+    "fetchTrainingInfo hung waiting for BrowserOS disconnect",
+  );
+
+  assert.equal(state.gotoUrl, TRAINING_INFO_URL);
+  assert.equal(state.disconnectCalled, true);
+  assert.equal(result.member.name, "테스트사용자");
+  assert.equal(result.comparison.year, "2026");
 });
 
 test("fetchTrainingInfo throws a relogin error instead of returning stale data when the session expired", async () => {

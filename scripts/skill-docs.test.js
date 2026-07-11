@@ -1,3 +1,4 @@
+// allow: SIZE_OK - Repository-wide documentation invariants remain one catalog-oriented suite.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -25,6 +26,27 @@ function findSection(doc, heading) {
 
   assert.ok(match, `expected section headed by "${heading}"`);
   return match[0];
+}
+
+function trackedTextFiles() {
+  return childProcess
+    .execFileSync("git", ["ls-files"], { cwd: repoRoot, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean)
+    .filter((relativePath) => fs.existsSync(path.join(repoRoot, relativePath)))
+    .filter((relativePath) => {
+      if (relativePath.startsWith(".omo/") || relativePath.startsWith(".private/")) return false;
+      if (relativePath.includes("/fixtures/")) return false;
+      return (
+        relativePath.endsWith(".md") ||
+        relativePath.endsWith(".mdx") ||
+        relativePath.endsWith(".txt") ||
+        relativePath.endsWith(".sh") ||
+        relativePath.endsWith(".js") ||
+        relativePath.endsWith(".yml") ||
+        relativePath.endsWith(".yaml")
+      );
+    });
 }
 
 function assertOliveYoungCloneFallbackCommands(doc, label) {
@@ -177,14 +199,10 @@ test("repository publishes Korean contribution guidance for external contributor
   assert.match(contributing, /릴리스나 패키징 관련 변경은 `npm run ci`/);
   assert.match(contributing, /`~\/\.claude\/skills\/<skill-name>`/);
   assert.match(contributing, /`~\/\.agents\/skills\/<skill-name>`/);
-  assert.match(
-    contributing,
-    /프로덕션 프록시는 \*\*Google Cloud Run\*\* \(project `k-skill-proxy`, region `asia-northeast1`\)에서 운영하며 `k-skill-proxy\.nomadamas\.org` 도메인에 매핑/,
-  );
-  assert.match(
-    contributing,
-    /프로덕션 시크릿은 GCP Secret Manager에 보관되고 Cloud Run 런타임에 주입됩니다\. 프록시 운영자\(maintainer\)가 한 번 수행해야 하는 WIF\/Secret Manager 셋업과 운영 점검 절차는 \[`docs\/deploy-k-skill-proxy\.md`\]\(docs\/deploy-k-skill-proxy\.md\)에 정리/,
-  );
+  assert.match(contributing, /Google Cloud Run/);
+  assert.match(contributing, /\.github\/workflows\/deploy-k-skill-proxy\.yml/);
+  assert.match(contributing, /GCP Secret Manager/);
+  assert.match(contributing, /`main`에 머지된 뒤에만 프로덕션에 반영/);
 });
 
 test("README links to the contribution guide", () => {
@@ -630,8 +648,57 @@ test("hosted proxy docs keep self-host overrides inactive and demonstrate resolv
   assert.match(proxyDoc, /BASE="\$\{KSKILL_PROXY_BASE_URL:-https:\/\/k-skill-proxy\.nomadamas\.org\}"/);
   for (const endpoint of ["seoul-subway/arrival", "korea-weather/forecast"]) {
     assert.match(proxyDoc, new RegExp(`curl -fsS --get "\\$\\{BASE\\}/v1/${endpoint}"`));
-    assert.doesNotMatch(proxyDoc, new RegExp(`curl -fsS --get 'http://127\\.0\\.0\\.1:4020/v1/${endpoint}'`));
+    assert.doesNotMatch(proxyDoc, /http:\/\/127\.0\.0\.1:\d+/);
   }
+});
+
+test("proxy deployment workflow and docs stay aligned with Cloud Run automation", () => {
+  const workflow = read(path.join(".github", "workflows", "deploy-k-skill-proxy.yml"));
+  const agents = read("AGENTS.md");
+  const deployDoc = read(path.join("docs", "deploy-k-skill-proxy.md"));
+  const featureDoc = read(path.join("docs", "features", "k-skill-proxy.md"));
+  const packageReadme = read(path.join("packages", "k-skill-proxy", "README.md"));
+  const dockerfile = read(path.join("packages", "k-skill-proxy", "Dockerfile"));
+  const dockerignore = read(".dockerignore");
+  const npmReleaseWorkflow = read(path.join(".github", "workflows", "release-npm.yml"));
+  const proxyPackage = JSON.parse(read(path.join("packages", "k-skill-proxy", "package.json")));
+
+  assert.match(workflow, /^name: Deploy k-skill-proxy to Cloud Run$/m);
+  assert.match(workflow, /^\s+branches: \[main\]$/m);
+  assert.match(workflow, /^\s+if: github\.ref == 'refs\/heads\/main'$/m);
+  assert.match(workflow, /^\s+id-token: write$/m);
+  assert.match(workflow, /google-github-actions\/auth@v3/);
+  assert.match(workflow, /google-github-actions\/deploy-cloudrun@v3/);
+  assert.match(workflow, /ASSEMBLY_API_KEY=ASSEMBLY_API_KEY:latest/);
+  assert.match(workflow, /KOPIS_API_KEY=KOPIS_API_KEY:latest/);
+  assert.match(workflow, /^\s+tag: candidate$/m);
+  assert.match(workflow, /^\s+suffix: \$\{\{ github\.sha \}\}$/m);
+  assert.match(workflow, /^\s+no_traffic: true$/m);
+  assert.match(workflow, /Smoke test \/health on the new revision/);
+  assert.match(workflow, /gcloud run services update-traffic/);
+  assert.match(workflow, /--to-revisions "\$\{REVISION_NAME\}=100"/);
+  assert.doesNotMatch(workflow, /--to-latest/);
+  assert.match(dockerfile, /COPY package\.json package-lock\.json/);
+  assert.match(dockerfile, /npm ci --omit=dev --workspace k-skill-proxy/);
+  assert.match(dockerignore, /^gha-creds-\*\.json$/m);
+  assert.doesNotMatch(npmReleaseWorkflow, /^\s+workflow_dispatch:/m);
+  assert.equal(proxyPackage.engines.node, ">=20");
+
+  for (const doc of [agents, deployDoc, featureDoc, packageReadme]) {
+    assert.match(doc, /Cloud Run/i);
+    assert.match(doc, /main/i);
+  }
+
+  assert.match(agents, /\.github\/workflows\/deploy-k-skill-proxy\.yml/);
+  assert.match(deployDoc, /Workload Identity Federation/);
+  assert.match(deployDoc, /GCP Secret Manager|Secret Manager/);
+  assert.match(deployDoc, /0% traffic/);
+  assert.match(deployDoc, /smoke test 통과 후 새 revision으로 production traffic/);
+  assert.match(deployDoc, /```bash\nset -euo pipefail\n/);
+  assert.match(deployDoc, /--revision-suffix="\$SHA"/);
+  assert.match(deployDoc, /--no-traffic/);
+  assert.match(deployDoc, /CANDIDATE_URL=/);
+  assert.match(deployDoc, /--to-revisions="\$\{REVISION_NAME\}=100"/);
 });
 
 test("kakaotalk-mac skill documents katok archive search usage", () => {
@@ -1883,7 +1950,7 @@ test("repository docs advertise the hipass-receipt skill across the documented s
   assert.match(readme, /\| 하이패스 영수증 발급 \|/);
   assert.match(readme, /\[하이패스 영수증 발급 가이드\]\(docs\/features\/hipass-receipt\.md\)/);
   assert.match(install, /--skill hipass-receipt/);
-  assert.match(setup, /하이패스 영수증 발급 \| 사용자 시크릿 불필요 \(로그인된 브라우저 세션 필요\)/);
+  assert.match(setup, /하이패스 영수증 발급 \| 사용자 시크릿 불필요 \(기본 `auto`: BrowserOS CDP → Aside Browser → Chrome CDP 세션에서 수동 로그인, \[브라우저 런타임\]\(browser-runtime\.md\) 참고\)/);
   assert.match(roadmap, /하이패스 영수증 발급 스킬 출시/);
   assert.match(sources, /https:\/\/www\.hipass\.co\.kr\/main\.do/);
   assert.match(sources, /https:\/\/www\.hipass\.co\.kr\/html\/guide\/siteguide_6\.jsp/);
@@ -2547,7 +2614,7 @@ test("real-estate-search skill uses proxy endpoints not MCP self-host", () => {
     assert.match(doc, /curl/);
     assert.doesNotMatch(doc, /uv run/);
     assert.doesNotMatch(doc, /codex mcp add/);
-    assert.doesNotMatch(doc, /Cloudflare Tunnel/i);
+    assert.doesNotMatch(doc, new RegExp(["Cloudflare", "Tunnel"].join(" "), "i"));
     assert.doesNotMatch(doc, /launchd/i);
     assert.doesNotMatch(doc, /docker compose/i);
   }

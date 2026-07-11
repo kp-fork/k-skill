@@ -1,261 +1,252 @@
-# k-skill-proxy 배포 가이드 (gpu01 + cron + Docker)
+# k-skill-proxy 배포 가이드 (Cloud Run + GitHub Actions)
 
-`k-skill-proxy` 프로덕션은 이제 Google Cloud Run이 아니라 **gpu01**의 Docker 컨테이너로 운영한다. GitHub Actions의 `main` push/merge 자동 배포는 프로덕션 배포 경로가 아니다.
+`k-skill-proxy`는 Google Cloud Run에서 운영되고, `main` 브랜치에 머지되면 GitHub Actions가 자동으로 재배포합니다.
 
-이 문서는 gpu01의 cron 기반 자동 배포, 시크릿/env 배치, 헬스체크, 로그, 롤백, 그리고 기존 GCP 리소스 정리 절차를 정리한다. 일반 contributor는 읽지 않아도 되며, 프록시 운영 maintainer가 gpu01 운영·복구·인계를 할 때 기준 문서로 사용한다.
+이 문서는 그 자동 배포 파이프라인의 **1회성 셋업 절차**와 **운영 점검 절차**를 정리합니다. 일반 contributor는 읽지 않아도 되며, 프록시 운영 maintainer가 인프라를 처음 만들거나 수리할 때 참고합니다.
 
 ## 운영 사실
 
 | 항목 | 값 |
 | --- | --- |
-| 프로덕션 호스트 | `gpu01` |
-| 공개 도메인 | `https://k-skill-proxy.nomadamas.org` |
-| 런타임 | Docker container |
-| 컨테이너 이름 | `k-skill-proxy` |
-| 후보 컨테이너 이름 | `k-skill-proxy-candidate` |
-| 이미지 태그 | `k-skill-proxy:<git-sha>` |
+| GCP project ID | `k-skill-proxy` |
+| Region | `asia-northeast1` (도쿄) |
+| Cloud Run service | `k-skill-proxy` |
+| Artifact Registry repo | `asia-northeast1-docker.pkg.dev/k-skill-proxy/k-skill` |
+| 공개 도메인 | `https://k-skill-proxy.nomadamas.org` (Cloud Run domain mapping) |
 | 컨테이너 이미지 정의 | `packages/k-skill-proxy/Dockerfile` |
-| Docker build context | repo root (`/opt/k-skill/current` 기준) |
-| 배포 스크립트 | `scripts/deploy-k-skill-proxy-gpu01.sh` |
-| 권장 repo checkout | `/opt/k-skill/current` |
-| 비밀 env 파일 | `/etc/k-skill-proxy/secrets.env` (`0600` 또는 더 엄격) |
-| 배포 대상 config | `/etc/k-skill-proxy/deploy.env` (`0640` 또는 더 엄격) |
-| 로그 디렉터리 | `/var/log/k-skill-proxy` |
-| 상태 디렉터리 | `/var/lib/k-skill-proxy` |
-| 프로덕션 포트 | host `127.0.0.1:4020` → container `8080` |
-| 후보 smoke 포트 | host `127.0.0.1:4021` → container `8080` |
-| 배포 트리거 | gpu01 cron이 host-configured deploy SHA/ref만 배포 |
-
-## 배포 의미론
-
-- `main` merge 자체는 프로덕션을 바꾸지 않는다.
-- gpu01 cron은 `/etc/k-skill-proxy/deploy.env`에 명시된 `KSKILL_PROXY_DEPLOY_SHA` 또는 `KSKILL_PROXY_DEPLOY_REF`만 배포한다.
-- 배포 대상이 설정되지 않았으면 스크립트는 fail-closed로 종료한다.
-- 스크립트는 절대 `origin/main`을 기본값으로 삼지 않는다.
-- 권장 초기 컷오버 방식은 `KSKILL_PROXY_DEPLOY_SHA=<full commit sha>`를 고정하는 것이다.
-- git 기반 승격이 더 편하면 `KSKILL_PROXY_DEPLOY_REF=production` 같은 전용 production branch/ref를 쓰되, 그 ref를 갱신하는 행위가 곧 프로덕션 승격이다.
+| 워크플로 | `.github/workflows/deploy-k-skill-proxy.yml` |
+| 인증 | Workload Identity Federation (long-lived JSON key 없음) |
+| 시크릿 저장소 | GCP Secret Manager (이름 = 환경변수 이름) |
 
 ## 배포 흐름
 
-cron이 실행하는 한 번의 배포는 다음 순서로만 성공한다.
+1. `dev` 브랜치에서 작업, PR을 `dev`에 보낸다.
+2. `dev` → `main` 머지 PR이 `@vkehfdl1`에 의해 머지된다.
+3. `main` push가 `.github/workflows/deploy-k-skill-proxy.yml`을 트리거한다.
+4. 워크플로가:
+   - WIF로 `${GCP_DEPLOY_SERVICE_ACCOUNT}`로 impersonate
+   - `packages/k-skill-proxy/Dockerfile`로 컨테이너 빌드
+   - Artifact Registry에 `:${GITHUB_SHA}` 태그로 push
+   - Cloud Run `k-skill-proxy`에 `candidate` 태그와 0% traffic으로 새 revision 배포 (Secret Manager 시크릿 + 런타임 env 주입)
+   - `candidate` revision의 `*.run.app` URL에서 `/health` smoke test
+   - smoke test 통과 후 새 revision으로 production traffic을 전환하고 `https://k-skill-proxy.nomadamas.org/health` 확인
+5. 실패 시 GitHub Actions 페이지에서 로그 확인. Cloud Run 자체는 마지막 healthy revision에 트래픽을 유지한다.
 
-1. `flock`으로 중복 실행을 막는다.
-2. `/etc/k-skill-proxy/deploy.env`와 `/etc/k-skill-proxy/secrets.env`를 검증한다.
-3. repo root에서 `git fetch --prune origin`을 실행한다.
-4. 명시된 deploy SHA/ref를 commit SHA로 해석한다.
-5. 현재 배포된 SHA와 같으면 아무 것도 바꾸지 않고 종료한다.
-6. 기존 serving state를 `/var/lib/k-skill-proxy/rollback-state.env`에 저장한다.
-7. checkout을 resolved SHA로 detach/force 이동한 뒤 repo root build context로 이미지를 빌드한다.
-8. 후보 컨테이너를 `127.0.0.1:4021`에서 띄운다.
-9. 후보 컨테이너의 local `/health`가 `ok: true`이고 필수 upstream 설정 boolean이 true인지 확인한다.
-10. 기존 프로덕션 컨테이너를 교체해 `127.0.0.1:4020`에 새 컨테이너를 띄운다.
-11. `https://k-skill-proxy.nomadamas.org/health` public smoke를 수행한다.
-12. 대표 read-only public route smoke를 수행한다.
-13. 모든 public smoke가 통과한 뒤에만 `/var/lib/k-skill-proxy/deployed-sha`를 갱신한다.
+## 1회성 GCP 셋업
 
-public smoke 실패는 경고가 아니라 배포 실패다. 상태 파일을 갱신하지 않고, 가능한 경우 이전 컨테이너/image/port/routing state로 rollback을 시도한다.
-
-## 1회성 gpu01 셋업
+> 이미 한 번 셋업되어 있다면 다시 실행할 필요 없음. 새 maintainer가 인계받거나 SA를 새로 만들 때만 사용.
 
 ```bash
-sudo install -d -m 0755 /opt/k-skill
-sudo install -d -m 0750 /etc/k-skill-proxy
-sudo install -d -m 0750 /var/lib/k-skill-proxy
-sudo install -d -m 0750 /var/log/k-skill-proxy
-
-# repo checkout. 운영자가 실제 deploy user 권한에 맞춰 owner를 조정한다.
-sudo git clone https://github.com/NomaDamas/k-skill.git /opt/k-skill/current
+export PROJECT_ID="k-skill-proxy"
+export PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+export GH_REPO="NomaDamas/k-skill"          # owner/repo
+export POOL_ID="github-actions-pool"
+export PROVIDER_ID="github-actions-provider"
+export DEPLOY_SA="k-skill-proxy-deploy"
+export DEPLOY_SA_EMAIL="${DEPLOY_SA}@${PROJECT_ID}.iam.gserviceaccount.com"
 ```
 
-필수 도구:
-
-- `git`
-- `docker`
-- `curl`
-- `python3`
-- `flock` (`util-linux`)
-
-reverse proxy는 `https://k-skill-proxy.nomadamas.org`를 gpu01의 `127.0.0.1:4020`으로 전달해야 한다. DNS/TLS/reverse proxy 설정은 repo 밖의 호스트 설정이므로 컷오버 때 public `/health`로 반드시 검증한다.
-
-## 배포 대상 설정
-
-`/etc/k-skill-proxy/deploy.env` 예시:
+### 1) 필요한 API 활성화
 
 ```bash
-# 가장 안전한 초기 컷오버: 정확한 commit SHA 고정
-KSKILL_PROXY_DEPLOY_SHA=0123456789abcdef0123456789abcdef01234567
-
-# 또는 전용 production ref를 의도적으로 운용할 때만 사용
-# KSKILL_PROXY_DEPLOY_REF=production
-
-KSKILL_PROXY_REPO_DIR=/opt/k-skill/current
-KSKILL_PROXY_CONTAINER_NAME=k-skill-proxy
-KSKILL_PROXY_IMAGE_NAME=k-skill-proxy
-KSKILL_PROXY_HOST_PORT=4020
-KSKILL_PROXY_CANDIDATE_PORT=4021
-KSKILL_PROXY_CONTAINER_PORT=8080
-KSKILL_PROXY_PUBLIC_BASE_URL=https://k-skill-proxy.nomadamas.org
-KSKILL_PROXY_STATE_DIR=/var/lib/k-skill-proxy
-KSKILL_PROXY_LOG_DIR=/var/log/k-skill-proxy
+gcloud services enable \
+  iamcredentials.googleapis.com \
+  run.googleapis.com \
+  artifactregistry.googleapis.com \
+  secretmanager.googleapis.com \
+  --project="$PROJECT_ID"
 ```
 
-둘 다 설정되어 있으면 `KSKILL_PROXY_DEPLOY_SHA`가 우선한다. 둘 다 없으면 배포하지 않는다.
-
-## 프로덕션 승격 절차
-
-### pinned SHA 방식
-
-1. `dev` → `main` merge 후 검증할 commit SHA를 정한다.
-2. gpu01에서 `/etc/k-skill-proxy/deploy.env`의 `KSKILL_PROXY_DEPLOY_SHA`를 해당 full SHA로 바꾼다.
-3. cron이 다음 주기에 배포하거나, 운영자가 스크립트를 수동 실행한다.
-
-### production branch 방식
-
-1. `production` 같은 전용 branch/ref를 운영한다.
-2. maintainer가 의도적으로 해당 ref를 fast-forward 또는 갱신한다.
-3. gpu01 cron은 `KSKILL_PROXY_DEPLOY_REF=production`만 해석해서 배포한다.
-
-이 방식을 써도 `main` merge 단독으로는 배포되지 않는다.
-
-## 시크릿과 runtime env
-
-`/etc/k-skill-proxy/secrets.env`는 repo에 넣지 않는다. root 또는 전용 deploy user만 읽을 수 있게 `0600` 또는 더 엄격하게 둔다.
-
-필수/운영 env 예시:
+### 2) Workload Identity Pool + GitHub OIDC provider
 
 ```bash
-AIR_KOREA_OPEN_API_KEY=...
-KMA_OPEN_API_KEY=...
-SEOUL_OPEN_API_KEY=...
-HRFCO_OPEN_API_KEY=...
-OPINET_API_KEY=...
-DATA_GO_KR_API_KEY=...
-DATA4LIBRARY_AUTH_KEY=...
-FOODSAFETYKOREA_API_KEY=...
-KAKAO_REST_API_KEY=...
-KEDU_INFO_KEY=...
-KRX_API_KEY=...
-KOSIS_API_KEY=...
-NAVER_SEARCH_CLIENT_ID=...
-NAVER_SEARCH_CLIENT_SECRET=...
-LAW_OC=...
+gcloud iam workload-identity-pools create "$POOL_ID" \
+  --project="$PROJECT_ID" \
+  --location=global \
+  --display-name="GitHub Actions"
 
-# 선택
-LAW_REFERER=
-LAW_USER_AGENT=
-
-# runtime knobs
-KSKILL_PROXY_HOST=0.0.0.0
-KSKILL_PROXY_NAME=k-skill-proxy
-KSKILL_PROXY_CACHE_TTL_MS=300000
-KSKILL_PROXY_RATE_LIMIT_WINDOW_MS=60000
-KSKILL_PROXY_RATE_LIMIT_MAX=60
-PORT=8080
+gcloud iam workload-identity-pools providers create-oidc "$PROVIDER_ID" \
+  --project="$PROJECT_ID" \
+  --location=global \
+  --workload-identity-pool="$POOL_ID" \
+  --display-name="GitHub OIDC" \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner,attribute.ref=assertion.ref,attribute.workflow_ref=assertion.workflow_ref" \
+  --attribute-condition="assertion.repository == '${GH_REPO}' && assertion.ref == 'refs/heads/main' && assertion.workflow_ref == '${GH_REPO}/.github/workflows/deploy-k-skill-proxy.yml@refs/heads/main'"
 ```
 
-## Docker access 보안 경계
+> `attribute-condition`은 토큰 발급 단계에서 저장소, `main` ref, 배포 워크플로 identity를 모두 고정합니다. 다른 브랜치나 다른 workflow가 같은 pool과 deploy SA를 재사용해 production 권한을 얻지 못하게 하는 핵심 가드입니다.
 
-Docker daemon, Docker socket, `docker` group, `sudo docker`, 컨테이너 inspect/start 권한은 모두 프로덕션 시크릿 접근 권한과 동일하게 취급한다. 컨테이너 env, bind mount, 로그, 대체 컨테이너 실행을 통해 upstream API key를 읽을 수 있기 때문이다.
-
-- 편의상 일반 사용자를 `docker` group에 추가하지 않는다.
-- cron user는 프로덕션 운영자로 간주하고 의도적으로 선택한다.
-- 배포 스크립트는 `set -x`를 쓰지 않고 env 값을 로그에 출력하지 않는다.
-- Docker socket을 외부에 노출하지 않는다.
-
-## cron 설정
-
-crontab 예시:
-
-```cron
-*/10 * * * * flock -n /var/lock/k-skill-proxy-deploy.lock /opt/k-skill/current/scripts/deploy-k-skill-proxy-gpu01.sh >> /var/log/k-skill-proxy/deploy.log 2>&1
-```
-
-cron은 production deploy trigger지만, 배포 대상은 항상 `/etc/k-skill-proxy/deploy.env`의 explicit SHA/ref다. cron 주기가 돌아도 대상 SHA가 바뀌지 않았으면 스크립트는 skip한다.
-
-## 수동 배포/점검
+기존 provider가 저장소 조건만 사용한다면 다음 명령으로 동일한 제한을 즉시 적용합니다.
 
 ```bash
-/opt/k-skill/current/scripts/deploy-k-skill-proxy-gpu01.sh
-curl -fsS https://k-skill-proxy.nomadamas.org/health
+gcloud iam workload-identity-pools providers update-oidc "$PROVIDER_ID" \
+  --project="$PROJECT_ID" \
+  --location=global \
+  --workload-identity-pool="$POOL_ID" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner,attribute.ref=assertion.ref,attribute.workflow_ref=assertion.workflow_ref" \
+  --attribute-condition="assertion.repository == '${GH_REPO}' && assertion.ref == 'refs/heads/main' && assertion.workflow_ref == '${GH_REPO}/.github/workflows/deploy-k-skill-proxy.yml@refs/heads/main'"
 ```
 
-로그:
+### 3) Deploy service account 생성
 
 ```bash
-tail -f /var/log/k-skill-proxy/deploy.log
-docker logs --tail=200 k-skill-proxy
+gcloud iam service-accounts create "$DEPLOY_SA" \
+  --project="$PROJECT_ID" \
+  --display-name="GitHub Actions k-skill-proxy deployer"
 ```
 
-## smoke test 기준
-
-### local health
+### 4) 풀 → service account impersonation 허용
 
 ```bash
-curl -fsS http://127.0.0.1:4021/health
+gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA_EMAIL" \
+  --project="$PROJECT_ID" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${GH_REPO}"
 ```
 
-candidate 단계에서는 후보 포트 `4021`, production 단계에서는 `4020`을 확인한다. `/health` JSON은 `ok: true`여야 하며, `upstreams`의 `*Configured` boolean이 true인지 확인한다.
-
-### public health
+### 5) deploy SA에 필요한 권한 부여
 
 ```bash
-curl -fsS https://k-skill-proxy.nomadamas.org/health
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
+  --role=roles/run.admin
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
+  --role=roles/artifactregistry.writer
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${DEPLOY_SA_EMAIL}" \
+  --role=roles/iam.serviceAccountUser
 ```
 
-public health 실패는 배포 실패다. deployed-state를 갱신하지 않는다.
+`iam.serviceAccountUser`는 Cloud Run의 런타임 service account(`${PROJECT_NUMBER}-compute@developer.gserviceaccount.com`)를 deploy SA가 대신 지정할 수 있게 하기 위함입니다.
 
-### 대표 route smoke
-
-기본 대표 route는 health만으로 잡히지 않는 public routing/API path 회귀를 확인하기 위한 read-only 요청이다. 운영 환경에서 upstream quota/availability를 고려해 route를 조정할 수 있다.
+### 6) Cloud Run 런타임 SA에 Secret Manager accessor 부여
 
 ```bash
-curl -fsS --get 'https://k-skill-proxy.nomadamas.org/v1/fine-dust/report' \
-  --data-urlencode 'stationName=종로구'
+RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+for s in \
+  AIR_KOREA_OPEN_API_KEY ASSEMBLY_API_KEY KMA_OPEN_API_KEY SEOUL_OPEN_API_KEY HRFCO_OPEN_API_KEY \
+  OPINET_API_KEY DATA_GO_KR_API_KEY KEDU_INFO_KEY \
+  DATA4LIBRARY_AUTH_KEY FOODSAFETYKOREA_API_KEY KAKAO_REST_API_KEY KRX_API_KEY \
+  KOPIS_API_KEY KOSIS_API_KEY NAVER_SEARCH_CLIENT_ID NAVER_SEARCH_CLIENT_SECRET LAW_OC; do
+  gcloud secrets add-iam-policy-binding "$s" \
+    --project="$PROJECT_ID" \
+    --member="serviceAccount:${RUNTIME_SA}" \
+    --role=roles/secretmanager.secretAccessor \
+    --condition=None >/dev/null
+done
 ```
 
-upstream 자체 장애가 확인된 경우에만 운영자가 로그에 사유를 남기고 route smoke를 별도 처리한다. public `/health`는 항상 필수다.
-
-## rollback
-
-배포 스크립트는 production switch 전에 `/var/lib/k-skill-proxy/rollback-state.env`에 다음 값을 저장한다.
-
-- timestamp
-- previous deployed SHA
-- previous image tag 또는 image ID
-- previous container name
-- previous container ID
-- previous host port → container port mapping
-- previous reverse-proxy upstream target
-- previous routing state
-- previous health status
-
-수동 rollback 기본 절차:
+### 7) WIF provider 리소스 이름 확인
 
 ```bash
-sudo -E /opt/k-skill/current/scripts/deploy-k-skill-proxy-gpu01.sh --rollback
-curl -fsS https://k-skill-proxy.nomadamas.org/health
+gcloud iam workload-identity-pools providers describe "$PROVIDER_ID" \
+  --project="$PROJECT_ID" \
+  --location=global \
+  --workload-identity-pool="$POOL_ID" \
+  --format='value(name)'
+# 예: projects/123456789/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
 ```
 
-문제가 이미지가 아니라 reverse proxy/DNS/TLS인 경우에는 저장된 routing state에 따라 이전 upstream target 또는 proxy 설정을 복원하고 proxy를 reload한다. rollback은 이전 이미지를 띄우는 것만으로 충분하다고 가정하지 않는다.
+이 값과 `${DEPLOY_SA_EMAIL}`을 GitHub에 등록합니다.
 
-## 문제 해결
+## GitHub repository secrets
 
-| 증상 | 확인할 것 |
+다음 두 개의 **secret**을 `Settings → Secrets and variables → Actions → Repository secrets`에 등록합니다.
+
+| Name | Value |
 | --- | --- |
-| `no deploy target configured` | `/etc/k-skill-proxy/deploy.env`에 `KSKILL_PROXY_DEPLOY_SHA` 또는 `KSKILL_PROXY_DEPLOY_REF`가 있는지 확인 |
-| health의 `*Configured`가 false | `/etc/k-skill-proxy/secrets.env`에 해당 upstream key가 있는지 확인 |
-| Docker build 실패 | repo root에서 `-f packages/k-skill-proxy/Dockerfile .`로 빌드되는지 확인 |
-| public health 실패 | DNS, TLS, reverse proxy upstream, firewall, container port mapping 확인 |
-| cron은 도는데 배포가 안 됨 | deployed SHA와 resolved SHA가 같은지, lock이 오래 잡혀 있는지, 로그 권한 확인 |
-| rollback 후에도 public 장애 | reverse proxy/routing state가 이전 target으로 복원됐는지 확인 |
+| `GCP_WIF_PROVIDER` | 위 7번에서 얻은 provider 리소스 전체 이름 |
+| `GCP_DEPLOY_SERVICE_ACCOUNT` | `k-skill-proxy-deploy@k-skill-proxy.iam.gserviceaccount.com` |
 
-## 기존 GCP/Cloud Run 정리
+> 값 자체가 민감하진 않지만, 외부에 노출되면 reconnaissance에 도움이 될 수 있으므로 secret으로 둡니다. variable로 옮겨도 동작은 동일합니다.
 
-GitHub Actions의 Cloud Run 자동 배포는 즉시 비활성화한다. 다만 Cloud Run, Artifact Registry, WIF, Secret Manager 리소스는 gpu01 안정화 기간 동안 legacy rollback/비교용으로 잠시 남길 수 있다.
+## Secret Manager에 upstream key 업로드
 
-정리 순서:
+```bash
+KEYS=(
+  AIR_KOREA_OPEN_API_KEY ASSEMBLY_API_KEY KMA_OPEN_API_KEY SEOUL_OPEN_API_KEY HRFCO_OPEN_API_KEY
+  OPINET_API_KEY DATA_GO_KR_API_KEY KEDU_INFO_KEY
+  DATA4LIBRARY_AUTH_KEY FOODSAFETYKOREA_API_KEY KAKAO_REST_API_KEY KRX_API_KEY
+  KOPIS_API_KEY KOSIS_API_KEY NAVER_SEARCH_CLIENT_ID NAVER_SEARCH_CLIENT_SECRET LAW_OC
+)
 
-1. gpu01 public `/health`와 대표 route smoke가 안정적으로 통과하는지 확인한다.
-2. GitHub에 push-to-main 배포 workflow가 남아 있지 않은지 확인한다.
-3. rollback window가 끝나면 Cloud Run traffic, Artifact Registry image, WIF provider/service account, Secret Manager secret을 수동 정리한다.
-4. 정리 기록은 운영 로그나 PR 본문에 남긴다.
+set -a; source ~/.config/k-skill/secrets.env; set +a
+
+for k in "${KEYS[@]}"; do
+  value="${!k:-}"
+  [[ -z "$value" ]] && { echo "skip $k (empty)"; continue; }
+  if gcloud secrets describe "$k" --project="$PROJECT_ID" >/dev/null 2>&1; then
+    printf '%s' "$value" | gcloud secrets versions add "$k" --data-file=- --project="$PROJECT_ID"
+  else
+    printf '%s' "$value" | gcloud secrets create "$k" --data-file=- --replication-policy=automatic --project="$PROJECT_ID"
+  fi
+done
+```
+
+키 값을 회전(rotate)할 때도 같은 명령을 다시 실행하면 새 version이 추가됩니다. Cloud Run은 `:latest`로 바인딩되어 있어 다음 배포부터 자동 반영됩니다(즉시 적용이 필요하면 새 revision을 한 번 더 deploy).
+
+## 운영 점검 절차
+
+- 자동 배포 상태: GitHub `Actions` 탭의 "Deploy k-skill-proxy to Cloud Run" 워크플로
+- 라이브 헬스체크: `curl -fsS https://k-skill-proxy.nomadamas.org/health`
+- Cloud Run revision/로그: GCP Console → Cloud Run → `k-skill-proxy` (`asia-northeast1`)
+- 이미지 태그: `asia-northeast1-docker.pkg.dev/k-skill-proxy/k-skill/k-skill-proxy:<commit-sha>`
+- 트래픽 롤백: 이전 revision으로 traffic split을 100% 되돌리거나, 직전 commit을 revert해서 main에 머지 → 워크플로가 다시 돈다.
+
+## 로컬에서 동일한 배포를 수동으로 돌리고 싶을 때
+
+`gcloud auth login`으로 maintainer 계정에 로그인된 상태에서:
+
+```bash
+set -euo pipefail
+
+SHA="$(git rev-parse HEAD)"
+IMAGE_URI="asia-northeast1-docker.pkg.dev/k-skill-proxy/k-skill/k-skill-proxy:${SHA}"
+REVISION_NAME="k-skill-proxy-${SHA}"
+
+gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
+docker build -t "$IMAGE_URI" -f packages/k-skill-proxy/Dockerfile .
+docker push "$IMAGE_URI"
+
+gcloud run deploy k-skill-proxy \
+  --image="$IMAGE_URI" \
+  --region=asia-northeast1 \
+  --platform=managed \
+  --allow-unauthenticated \
+  --tag=candidate \
+  --revision-suffix="$SHA" \
+  --no-traffic \
+  --execution-environment=gen2 \
+  --cpu=1 --memory=512Mi --min-instances=0 --max-instances=3 \
+  --concurrency=80 --timeout=60 --cpu-boost \
+  --project=k-skill-proxy
+
+CANDIDATE_URL="$(gcloud run services describe k-skill-proxy \
+  --region=asia-northeast1 \
+  --project=k-skill-proxy \
+  --format='value(status.traffic[?tag=candidate].url)')"
+
+curl -fsS --max-time 15 "${CANDIDATE_URL}/health" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+if not data.get("ok"):
+    raise SystemExit("candidate health check failed")
+missing = [k for k, v in data.get("upstreams", {}).items() if k.endswith("Configured") and v is not True]
+if missing:
+    raise SystemExit(f"candidate upstreams not configured: {missing}")
+'
+
+gcloud run services update-traffic k-skill-proxy \
+  --region=asia-northeast1 \
+  --project=k-skill-proxy \
+  --to-revisions="${REVISION_NAME}=100" \
+  --quiet
+
+curl -fsS --max-time 15 https://k-skill-proxy.nomadamas.org/health
+```
+
+이 명령은 평상시에는 필요 없습니다. GitHub Actions가 같은 일을 하기 때문입니다.
