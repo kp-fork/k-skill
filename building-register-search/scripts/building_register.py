@@ -11,8 +11,12 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 from typing import Any, Dict, Optional
+
+SCRIPTS_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+from building_register_xml import parse_direct_xml
 
 
 DEFAULT_PROXY_BASE_URL = "https://k-skill-proxy.nomadamas.org"
@@ -199,33 +203,7 @@ def http_get_direct_xml(url: str, timeout: int) -> Dict[str, Any]:
         raise HelperError(f"건축물대장 API 네트워크 오류: {error.reason}") from error
     except TimeoutError as error:
         raise HelperError("건축물대장 API 요청 시간이 초과되었습니다.") from error
-    try:
-        root = ET.fromstring(raw)
-    except ET.ParseError as error:
-        raise HelperError("건축물대장 API 응답 XML이 올바르지 않습니다.") from error
-    result_code = (root.findtext("./header/resultCode") or "").strip()
-    result_message = (root.findtext("./header/resultMsg") or "").strip()
-    if result_code not in {"", "0", "00"}:
-        raise HelperError(f"건축물대장 API 오류: {result_message or result_code}")
-    body = root.find("./body")
-    if body is None:
-        raise HelperError("건축물대장 API 응답 본문이 없습니다.")
-    items = [{child.tag: child.text or "" for child in item} for item in body.findall("./items/item")]
-    pagination = {}
-    for field, default in (("pageNo", 1), ("numOfRows", len(items)), ("totalCount", len(items))):
-        try:
-            pagination[field] = int(body.findtext(field) or default)
-        except ValueError as error:
-            raise HelperError(f"건축물대장 API 응답 {field}가 올바른 정수가 아닙니다.") from error
-        if pagination[field] < 0:
-            raise HelperError(f"건축물대장 API 응답 {field}가 음수입니다.")
-    return {
-        "page": pagination["pageNo"],
-        "page_size": pagination["numOfRows"],
-        "total_count": pagination["totalCount"],
-        "items": items,
-        "source": {"data_go_kr_dataset": "15134735", "operation": "getBrTitleInfo", "response_format": "XML"},
-    }
+    return parse_direct_xml(raw, HelperError)
 
 
 def format_text(payload: Dict[str, Any]) -> str:
