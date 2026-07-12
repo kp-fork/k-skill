@@ -15,6 +15,8 @@
 - `GET /v1/han-river/water-level`
 - `GET /v1/household-waste/info` — 생활쓰레기 배출정보(`DATA_GO_KR_API_KEY`; `pageNo=1`, `numOfRows=100` 필수)
 - `GET /v1/parking-lots/search` — 전국주차장정보표준데이터 기반 근처 공영주차장 검색(`DATA_GO_KR_API_KEY`)
+- `GET /v1/ev-charger/info` — 환경부 전기차 충전소 정보(`DATA_GO_KR_API_KEY`, 데이터셋 `15076352`)
+- `GET /v1/ev-charger/status` — 환경부 전기차 충전기 상태(`DATA_GO_KR_API_KEY`, 데이터셋 `15076352`)
 - `GET /v1/neis/school-search` — 나이스 학교기본정보(교육청명·학교명 검색)
 - `GET /v1/neis/school-meal` — 나이스 급식식단정보(일자별 메뉴)
 - `POST /v1/nts-business/status` — 국세청 사업자등록 상태조회(`DATA_GO_KR_API_KEY`)
@@ -85,7 +87,7 @@
 - `KSKILL_PROXY_RATE_LIMIT_MAX` — 기본 `60`
 - `KSKILL_PROXY_RATE_LIMIT_MAX_CLIENTS` — 메모리에 유지할 client rate-limit bucket 상한, 기본 `10000`
 - `KSKILL_PROXY_TRUST_PROXY_HOPS` — Fastify가 신뢰할 reverse-proxy hop 수, 기본 `0`. 운영 reverse proxy 구조에 맞는 최소 hop 수만 설정하고 직접 노출되는 로컬 서버에서는 설정하지 않는다.
-- `DATA_GO_KR_API_KEY` - 공공데이터포털 에서 쓰이는 API 인증키 (`household-waste`, `parking-lots`, `real-estate`, `nts-business`, `mfds-drug-safety`, `mfds-food-safety`, `lh-notice`, `nhis/*`, `kr-whois/*`). 각 서비스는 공공데이터포털에서 별도 "활용신청" 승인이 필요하다. 키를 발급받은 뒤에는 [LH 임대공고문 정보](https://www.data.go.kr/data/15058530/openapi.do), [국민건강보험공단 장기요양기관 검색 서비스](https://www.data.go.kr/data/15059029/openapi.do), [국민건강보험공단 검진기관 찾기 조회](https://www.data.go.kr/data/15154419/openapi.do), WHOIS 도메인/IP 정보 API(서비스 `15094277`) 페이지에서도 활용신청을 눌러 동일 키를 활성화해야 해당 라우트가 성공한다. 미활성 상태에서는 upstream이 HTTP 403 Forbidden 또는 data.go.kr gateway 오류를 돌려주고 proxy는 upstream error로 변환한다.
+- `DATA_GO_KR_API_KEY` - 공공데이터포털 에서 쓰이는 API 인증키 (`household-waste`, `parking-lots`, `ev-charger/*`, `real-estate`, `nts-business`, `mfds-drug-safety`, `mfds-food-safety`, `lh-notice`, `nhis/*`, `kr-whois/*`). 각 서비스는 공공데이터포털에서 별도 "활용신청" 승인이 필요하다. 키를 발급받은 뒤에는 [전기자동차 충전소 정보](https://www.data.go.kr/data/15076352/openapi.do), [LH 임대공고문 정보](https://www.data.go.kr/data/15058530/openapi.do), [국민건강보험공단 장기요양기관 검색 서비스](https://www.data.go.kr/data/15059029/openapi.do), [국민건강보험공단 검진기관 찾기 조회](https://www.data.go.kr/data/15154419/openapi.do), WHOIS 도메인/IP 정보 API(서비스 `15094277`) 페이지에서도 활용신청을 눌러 동일 키를 활성화해야 해당 라우트가 성공한다. EV 데이터셋 `15076352`는 자동승인 대상이지만 별도 신청이 필요하다. 미활성 상태에서는 upstream이 HTTP 403 Forbidden 또는 data.go.kr gateway 오류를 돌려주고 proxy는 upstream error로 변환한다.
 
 기본 정책은 **무료 API 공개 프록시 = 무인증** 이다. 대신 endpoint scope 를 좁게 유지하고, cache + rate limit 으로 남용을 늦춘다.
 
@@ -180,6 +182,17 @@ curl -fsS --get "${LOCAL_PROXY_BASE_URL}/v1/parking-lots/search" \
   --data-urlencode 'address_hint=서울특별시 종로구' \
   --data-urlencode 'limit=3' \
   --data-urlencode 'radius=1500'
+```
+
+전기차 충전소 정보·상태 예시 (`DATA_GO_KR_API_KEY`와 데이터셋 `15076352` 활용신청 필요):
+
+```bash
+curl -fsS --get "${LOCAL_PROXY_BASE_URL}/v1/ev-charger/info" \
+  --data-urlencode 'location=서울 강남구'
+
+curl -fsS --get "${LOCAL_PROXY_BASE_URL}/v1/ev-charger/status" \
+  --data-urlencode 'statId=ME000001' \
+  --data-urlencode 'limitYn=Y'
 ```
 
 의약품 안전 체크 예시 (`DATA_GO_KR_API_KEY` 필요):

@@ -55,6 +55,7 @@ const { normalizeNationalPensionQuery, fetchNationalPensionWorkplace } = require
 const { normalizeFscCorpQuery, fetchFscCorpOutline } = require("./fsc-corp");
 const { normalizeG2bSanctionQuery, fetchG2bSanctions } = require("./g2b-sanction");
 const { normalizeG2bOrderPlanQuery, fetchG2bOrderPlans } = require("./g2b-order-plan");
+const { fetchEvCharger, normalizeEvChargerQuery } = require("./ev-charger");
 const {
   normalizeKoreanLawDetailQuery,
   normalizeKoreanLawSearchQuery,
@@ -211,6 +212,7 @@ function buildConfig(env = process.env) {
     hrfcoApiKey: trimOrNull(env.HRFCO_OPEN_API_KEY),
     opinetApiKey: trimOrNull(env.OPINET_API_KEY),
     molitApiKey: trimOrNull(env.DATA_GO_KR_API_KEY),
+    evChargerApiKey: trimOrNull(env.DATA_GO_KR_API_KEY),
     data4libraryAuthKey: trimOrNull(env.DATA4LIBRARY_AUTH_KEY),
     foodsafetyKoreaApiKey: trimOrNull(env.FOODSAFETYKOREA_API_KEY),
     kakaoRestApiKey: trimOrNull(env.KAKAO_REST_API_KEY),
@@ -2089,6 +2091,7 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
         nationalPensionConfigured: Boolean(config.molitApiKey),
         fscCorpConfigured: Boolean(config.molitApiKey),
         g2bSanctionConfigured: Boolean(config.molitApiKey),
+        evChargerConfigured: Boolean(config.evChargerApiKey),
         koreanLawConfigured: Boolean(config.lawOc)
       },
       auth: {
@@ -2926,6 +2929,47 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
     reply.header("content-type", upstream.contentType);
     return upstream.body;
   });
+
+  async function handleEvChargerRoute(operation, request, reply) {
+    let normalized;
+    try {
+      normalized = normalizeEvChargerQuery(operation, request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return { error: "bad_request", message: error.message };
+    }
+
+    const cacheKey = makeCacheKey({ route: `ev-charger-${operation}`, ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return {
+        ...cached,
+        proxy: { ...cached.proxy, cache: { hit: true, ttl_ms: config.cacheTtlMs } }
+      };
+    }
+
+    const result = await fetchEvCharger({
+      params: normalized,
+      serviceKey: config.evChargerApiKey
+    });
+    if (result.error) {
+      reply.code(result.status_code || 502);
+      return result;
+    }
+    const payload = {
+      ...result,
+      proxy: {
+        name: config.proxyName,
+        cache: { hit: false, ttl_ms: config.cacheTtlMs },
+        requested_at: new Date().toISOString()
+      }
+    };
+    cache.set(cacheKey, payload, config.cacheTtlMs);
+    return payload;
+  }
+
+  app.get("/v1/ev-charger/info", async (request, reply) => handleEvChargerRoute("info", request, reply));
+  app.get("/v1/ev-charger/status", async (request, reply) => handleEvChargerRoute("status", request, reply));
 
   app.get("/v1/nhis/long-term-care", async (request, reply) => {
     let normalized;
