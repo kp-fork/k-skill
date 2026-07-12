@@ -100,6 +100,7 @@ class CourtAuctionPlaywrightClient {
     // below remains intact for when no CDP endpoint is reachable.
     this.preferRuntime = options.preferRuntime !== false;
     this.provider = options.provider || undefined;
+    this.platform = options.platform || undefined;
     this.cdpUrl = options.cdpUrl || undefined;
     this.probe = options.probe;
     this.asideProbe = options.asideProbe;
@@ -160,6 +161,7 @@ class CourtAuctionPlaywrightClient {
   async ensureCdpBrowser(runtime) {
     const connectOptions = {};
     if (this.provider) connectOptions.provider = this.provider;
+    if (this.platform) connectOptions.platform = this.platform;
     if (this.cdpUrl) connectOptions.cdpUrl = this.cdpUrl;
     if (this.probe !== undefined) connectOptions.probe = this.probe;
     if (this.asideProbe !== undefined) connectOptions.asideProbe = this.asideProbe;

@@ -24,7 +24,7 @@
 npm install yebigun-training
 ```
 
-배포 패키지는 브라우저 연결을 `k-skill-browser-runtime`으로 처리한다. 기본은 `auto`로, BrowserOS CDP(`http://127.0.0.1:9100`) → Aside Browser(`aside repl`) → Chrome CDP(`http://127.0.0.1:9222`) 순서다. `KSKILL_BROWSER_PROVIDER`로 provider를 고정하거나 `--cdp-url`로 특정 CDP 세션에 직접 붙일 수 있다. 런타임은 BrowserOS/Aside를 launch하거나 BrowserOS를 headless로 띄우지 않고, 정리 시 automation client와 adapter 생성 tab만 정리한다.
+배포 패키지는 브라우저 연결을 `k-skill-browser-runtime`으로 처리한다. 기본은 `auto`로, macOS는 Aside Browser(`aside repl`) → BrowserOS CDP(`http://127.0.0.1:9100`) → Chrome CDP(`http://127.0.0.1:9222`), 기타 플랫폼은 BrowserOS → Aside → Chrome 순서다. `KSKILL_BROWSER_PROVIDER`로 provider를 고정하거나 `--cdp-url`로 특정 CDP 세션에 직접 붙일 수 있다. 런타임은 BrowserOS/Aside를 launch하거나 BrowserOS를 headless로 띄우지 않고, 정리 시 automation client와 adapter 생성 tab만 정리한다.
 
 이 레포를 clone한 유지보수자라면 루트에서 `npm install`로 workspace 패키지까지 함께 설치해도 된다.
 

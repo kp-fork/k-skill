@@ -631,6 +631,7 @@ test("searchProperties constructs and safely closes a BrowserOS/runtime CDP fall
     client: primary,
     // Flow runtime-CDP injection options through pickClientOptions into the
     // internally constructed CourtAuctionPlaywrightClient.
+    platform: "linux",
     probe: false,
     connectLoader: async () => fakeBrowser,
     courtCode: "B000210",

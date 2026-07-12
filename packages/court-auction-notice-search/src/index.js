@@ -155,6 +155,7 @@ function pickClientOptions(input) {
   if (input.delayImpl !== undefined) out.delayImpl = input.delayImpl;
   if (input.chromiumLoader !== undefined) out.chromiumLoader = input.chromiumLoader;
   if (input.provider !== undefined) out.provider = input.provider;
+  if (input.platform !== undefined) out.platform = input.platform;
   if (input.cdpUrl !== undefined) out.cdpUrl = input.cdpUrl;
   if (input.probe !== undefined) out.probe = input.probe;
   if (input.connectLoader !== undefined) out.connectLoader = input.connectLoader;

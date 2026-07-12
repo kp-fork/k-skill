@@ -14,6 +14,9 @@ const fixtures = {
 async function withMockedBrowserModule(factory, callback) {
   const browserModulePath = require.resolve("../src/browser");
   const originalLoad = Module._load;
+  const originalProvider = process.env.KSKILL_BROWSER_PROVIDER;
+
+  process.env.KSKILL_BROWSER_PROVIDER = "chrome-cdp";
 
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request === "playwright-core" || request === "playwright") {
@@ -37,6 +40,11 @@ async function withMockedBrowserModule(factory, callback) {
     return await callback(browserModule);
   } finally {
     Module._load = originalLoad;
+    if (originalProvider === undefined) {
+      delete process.env.KSKILL_BROWSER_PROVIDER;
+    } else {
+      process.env.KSKILL_BROWSER_PROVIDER = originalProvider;
+    }
     delete require.cache[browserModulePath];
   }
 }

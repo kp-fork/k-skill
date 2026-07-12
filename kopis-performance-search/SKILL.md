@@ -12,7 +12,7 @@ metadata:
 
 ## What this skill does
 
-KOPIS 공연예술통합전산망 Open API `https://www.kopis.or.kr/openApi/restful` 을 `k-skill-proxy` 경유로 호출한다.
+KOPIS 공연예술통합전산망 Open API `https://kopis.or.kr/openApi/restful` 을 `k-skill-proxy` 경유로 호출한다. `www.kopis.or.kr` redirect는 일부 요청을 차단할 수 있어 canonical host를 직접 사용한다.
 
 지원 endpoint:
 

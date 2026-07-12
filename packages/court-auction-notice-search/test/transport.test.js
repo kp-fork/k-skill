@@ -297,6 +297,7 @@ test("CourtAuctionPlaywrightClient prefers the BrowserOS/runtime CDP path when u
   const cdp = createFakeCdpBrowser({ status: 200, body: propertiesSample });
   const client = new CourtAuctionPlaywrightClient({
     baseUrl: "https://www.courtauction.go.kr",
+    platform: "linux",
     probe: false,
     connectLoader: async () => cdp.browser
   });
@@ -386,6 +387,7 @@ test("CourtAuctionPlaywrightClient CDP path cleans up only owned page/context an
   const cdp = createFakeCdpBrowser({ status: 200, body: propertiesSample });
   const client = new CourtAuctionPlaywrightClient({
     baseUrl: "https://www.courtauction.go.kr",
+    platform: "linux",
     probe: false,
     connectLoader: async () => cdp.browser
   });

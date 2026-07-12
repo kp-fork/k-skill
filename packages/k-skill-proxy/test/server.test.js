@@ -22,7 +22,9 @@ const {
   normalizeKoreanHolidayQuery,
   normalizeKopisListQuery,
   normalizeKstartupQuery,
+  normalizeKrWhoisAsQuery,
   normalizeKrWhoisDomainQuery,
+  normalizeKrWhoisIpQuery,
   normalizeNhisCheckupQuery,
   normalizeNhisLongTermCareQuery,
   normalizeNtsBusinessStatusQuery,
@@ -290,6 +292,120 @@ test("KR WHOIS domain route reports missing and rejected upstream key", async (t
   const rejected = await rejectedApp.inject({ method: "GET", url: "/v1/kr-whois/domain?domain=kisa.or.kr" });
   assert.equal(rejected.statusCode, 502);
   assert.equal(rejected.json().error, "upstream_forbidden");
+});
+
+test("KR WHOIS IP and AS normalizers accept canonical public lookup inputs", () => {
+  assert.deepEqual(normalizeKrWhoisIpQuery({ ip: "202.30.50.51" }), {
+    query: "202.30.50.51",
+    answer: "json"
+  });
+  assert.deepEqual(normalizeKrWhoisIpQuery({ q: "2001:dc0::1" }), {
+    query: "2001:dc0::1",
+    answer: "json"
+  });
+  assert.deepEqual(normalizeKrWhoisAsQuery({ asn: "as9700" }), {
+    query: "AS9700",
+    answer: "json"
+  });
+
+  assert.throws(() => normalizeKrWhoisIpQuery({}), /IP address/);
+  assert.throws(() => normalizeKrWhoisIpQuery({ ip: "999.1.1.1" }), /valid IP/);
+  assert.throws(() => normalizeKrWhoisAsQuery({ asn: "9700" }), /AS number/);
+  assert.throws(() => normalizeKrWhoisAsQuery({ asn: "AS0" }), /valid AS/);
+});
+
+test("KR WHOIS IP and AS routes inject the server key and cache per operation", async (t) => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    calls.push(parsed);
+    return new Response(
+      JSON.stringify({
+        response: {
+          result: { result_code: "10000", result_msg: "정상 응답 입니다." },
+          whois: { query: parsed.searchParams.get("query") }
+        }
+      }),
+      { status: 200, headers: { "content-type": "application/json;charset=UTF-8" } }
+    );
+  };
+
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "data-go-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const ipFirst = await app.inject({ method: "GET", url: "/v1/kr-whois/ip?ip=202.30.50.51" });
+  const ipSecond = await app.inject({ method: "GET", url: "/v1/kr-whois/ip?q=202.30.50.51" });
+  const asFirst = await app.inject({ method: "GET", url: "/v1/kr-whois/as?asn=AS9700" });
+  const asSecond = await app.inject({ method: "GET", url: "/v1/kr-whois/as?q=as9700" });
+
+  assert.equal(ipFirst.statusCode, 200);
+  assert.equal(ipSecond.statusCode, 200);
+  assert.equal(asFirst.statusCode, 200);
+  assert.equal(asSecond.statusCode, 200);
+  assert.equal(calls.length, 2, "each operation should cache its successful response");
+  assert.equal(calls[0].pathname, "/B551505/whois/ip_address");
+  assert.equal(calls[0].searchParams.get("serviceKey"), "data-go-key");
+  assert.equal(calls[0].searchParams.get("query"), "202.30.50.51");
+  assert.equal(calls[1].pathname, "/B551505/whois/as_number");
+  assert.equal(calls[1].searchParams.get("query"), "AS9700");
+});
+
+test("KR WHOIS IP and AS routes redact echoed keys and do not cache semantic failures", async (t) => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    const body = calls === 1
+      ? JSON.stringify({ response: { result: { result_code: "11000", result_msg: "serviceKey=data-go-key" } } })
+      : JSON.stringify({ response: { result: { result_code: "10000", result_msg: "정상 응답 입니다." } } });
+    return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "data-go-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const url = "/v1/kr-whois/ip?ip=202.30.50.51";
+  const first = await app.inject({ method: "GET", url });
+  assert.equal(first.statusCode, 200);
+  assert.doesNotMatch(first.body, /data-go-key/);
+  assert.match(first.body, /\[REDACTED\]/);
+
+  const second = await app.inject({ method: "GET", url });
+  assert.equal(second.statusCode, 200);
+  assert.match(second.body, /10000/);
+  assert.equal(calls, 2, "WHOIS semantic failures must not be cached");
+});
+
+test("KR WHOIS routes do not expose the server key when fetch throws", async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    throw new Error(`request failed for ${url}`);
+  };
+
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "super-secret-data-go-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  for (const url of [
+    "/v1/kr-whois/domain?domain=kisa.or.kr",
+    "/v1/kr-whois/ip?ip=202.30.50.51",
+    "/v1/kr-whois/as?asn=AS9700"
+  ]) {
+    const response = await app.inject({ method: "GET", url });
+    assert.equal(response.statusCode, 502);
+    assert.equal(response.json().error, "upstream_fetch_failed");
+    assert.doesNotMatch(response.body, /super-secret-data-go-key/);
+    assert.doesNotMatch(response.body, /serviceKey=/i);
+  }
 });
 
 test("NHIS long-term care normalizer validates bounded search params", () => {
@@ -630,6 +746,7 @@ test("KOPIS routes inject service key and cache list responses", async (t) => {
   const first = await app.inject({ method: "GET", url: "/v1/kopis/performances?start=20260101&end=20260131&limit=5" });
   assert.equal(first.statusCode, 200);
   assert.match(first.body, /햄릿/);
+  assert.match(calls[0], /^https:\/\/kopis\.or\.kr\/openApi\/restful\/pblprfr\?/);
   assert.match(calls[0], /\/openApi\/restful\/pblprfr\?/);
   assert.match(calls[0], /service=kopis-key/);
   assert.match(calls[0], /stdate=20260101/);

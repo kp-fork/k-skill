@@ -8,7 +8,7 @@
 - ✅ Workflow B — 사건번호로 직접 조회 (사건정보·물건내역·매각기일내역·배당요구종기)
 - ✅ Workflow C — 자유 조건검색(지역·용도·가격대·면적·유찰횟수·매각기일)
 - ✅ 코드테이블 — 법원사무소(60+개) + 입찰구분(기일/기간) + Workflow C용 용도/지역 대표 코드 매핑
-- ✅ 3-tier transport — direct HTTP 1차, runtime browser fallback(BrowserOS → Aside Browser → Chrome CDP), 그리고 로컬 Playwright(`rebrowser-playwright`/`playwright-core`) launch fallback
+- ✅ 3-tier transport — direct HTTP 1차, platform-aware runtime browser fallback(macOS: Aside → BrowserOS → Chrome, 기타: BrowserOS → Aside → Chrome), 그리고 로컬 Playwright(`rebrowser-playwright`/`playwright-core`) launch fallback
 - ✅ 안티봇 가드 — 호출 간 ≥2초 jitter, 세션당 호출 budget(기본 10회), `data.ipcheck === false` 즉시 throw
 - ❌ Workflow D 일별/월별 캘린더 — 별도 follow-up 이슈
 - ❌ 매각물건 사진 / 매각물건명세서 PDF / 감정평가서 PDF — 별도 follow-up 이슈
@@ -126,7 +126,7 @@ court-auction-notice-search case --court-code B000210 --case-number "2024타경1
   - `flbdCount`: 유찰횟수 `{ min, max }` **정수만**
   - `area`: 면적(㎡) `{ min, max }` (실수 허용)
   - `pageSize`: upstream PGJ151 드롭다운에서 확인된 `10`, `20`, `50`, `100` 중 하나(기본 10). `1` 등 임의 값은 live endpoint 가 HTTP 400을 반환하므로 로컬에서 거부한다.
-  - `fallback`: `false` 면 browser auto-fallback 비활성. 기본 true. Workflow C raw-HTTP WAF의 HTTP 400 시, 또는 `BLOCKED`(`ipcheck=false`)에 명시적으로 `fallbackOnBlocked:true` 를 준 경우에만 browser fallback 이 동작한다. fallback 은 (1) runtime auto 세션(BrowserOS CDP → Aside Browser REPL → Chrome CDP) 을 우선 사용하고, (2) runtime provider 가 모두 닿지 않으면 로컬 `chromium.launch`(`rebrowser-playwright`/`playwright-core`) fallback 으로 이어진다. Playwright 모듈 미설치 시 자동 무시. `provider`/`cdpUrl` 옵션이나 `KSKILL_BROWSER_PROVIDER`/`KSKILL_BROWSEROS_CDP_URL`/`KSKILL_ASIDE_COMMAND` 환경변수로 runtime provider/URL 을 선택할 수 있다.
+  - `fallback`: `false` 면 browser auto-fallback 비활성. 기본 true. Workflow C raw-HTTP WAF의 HTTP 400 시, 또는 `BLOCKED`(`ipcheck=false`)에 명시적으로 `fallbackOnBlocked:true` 를 준 경우에만 browser fallback 이 동작한다. fallback 은 (1) platform-aware runtime auto 세션(macOS: Aside → BrowserOS → Chrome, 기타: BrowserOS → Aside → Chrome)을 우선 사용하고, (2) runtime provider 가 모두 닿지 않으면 로컬 `chromium.launch`(`rebrowser-playwright`/`playwright-core`) fallback 으로 이어진다. Playwright 모듈 미설치 시 자동 무시. `provider`/`cdpUrl` 옵션이나 `KSKILL_BROWSER_PROVIDER`/`KSKILL_BROWSEROS_CDP_URL`/`KSKILL_ASIDE_COMMAND` 환경변수로 runtime provider/URL 을 선택할 수 있다.
   - returns `{ requestedFilters, page, count, items[] }` — `items[i]` 가 `{ caseNumber, displayCaseNumber, itemNumber, address, appraisedPrice, minimumSalePrice, flbdCount, statusCode, progressStatusCode, courtCode, courtName, judgeDeptCode, judgeDeptName, documentId, saleDate, salePlace, bidTypeCode, usageCodes, regionCodes, coordinates, coordinatesWgs84, buildingList, areaList, landCategoryList, propertyDescription, areaRange, remarks, raw }`
 - `getCourtCodes({ client? })` — 법원사무소 코드표 동적 로드
 - `getBidTypes()` — 입찰구분 정적 코드표 (기일입찰=`000331`, 기간입찰=`000332`)
@@ -134,7 +134,7 @@ court-auction-notice-search case --court-code B000210 --case-number "2024타경1
 - `getRegionCodes()` — Workflow C용 정적 시도 코드표(19행). upstream `selectAdongSdLst.on` 캡처. 시군구/읍면동은 cascade XHR이 안정적으로 노출되지 않아 정적 표에 미포함; raw 코드(`"11680"` 등)를 그대로 전달.
 - `resolveBidTypeCode(input)`, `describeBidTypeCode(code)` — 코드 변환 헬퍼
 - `CourtAuctionHttpClient` — direct HTTP 클라이언트. fetchImpl, timeoutMs, minDelayMs, jitterMs, maxCallsPerSession 모두 override 가능.
-- `CourtAuctionPlaywrightClient` — browser fallback 클라이언트. `postJson(endpointKey, body)` 시그니처는 direct HTTP 와 동일. 기본적으로 runtime auto 세션(BrowserOS → Aside Browser → Chrome CDP)을 우선 사용(`provider`/`cdpUrl`/`probe`/`connectLoader`/`preferRuntime` 옵션으로 제어)하고, runtime provider 가 닿지 않으면 로컬 `chromium.launch`(`headless` 옵션) fallback 으로 동작. `playwright-core`/`rebrowser-playwright` 필요.
+- `CourtAuctionPlaywrightClient` — browser fallback 클라이언트. `postJson(endpointKey, body)` 시그니처는 direct HTTP 와 동일. 기본적으로 platform-aware runtime auto 세션을 우선 사용(`provider`/`cdpUrl`/`probe`/`connectLoader`/`preferRuntime` 옵션으로 제어)하고, runtime provider 가 닿지 않으면 로컬 `chromium.launch`(`headless` 옵션) fallback 으로 동작. `playwright-core`/`rebrowser-playwright` 필요.
 - `isPlaywrightFallbackAvailable()` — fallback 모듈 설치 여부.
 - 에러 헬퍼: `createBlockedError`, `createUpstreamError`, `createNetworkError`.
 
@@ -184,7 +184,7 @@ Workflow C(`searchProperties`)는 direct HTTP 를 1차로 사용한다. browser 
 
 fallback 이 동작할 때의 browser-runtime 우선순위:
 
-1. **Runtime browser (preferred)** — `k-skill-browser-runtime` auto 순서로 사용자가 미리 띄운 BrowserOS GUI CDP 세션, Aside Browser REPL, Chrome/Chromium CDP 세션을 시도한다. `provider`(`"browseros"`/`"aside"`/`"chrome-cdp"`)·`cdpUrl` 옵션이나 `KSKILL_BROWSER_PROVIDER` 환경변수로 선택.
+1. **Runtime browser (preferred)** — `k-skill-browser-runtime` auto 순서로 macOS에서는 Aside Browser REPL, BrowserOS GUI CDP, Chrome/Chromium CDP를 시도하고 기타 플랫폼에서는 BrowserOS를 먼저 시도한다. `provider`(`"browseros"`/`"aside"`/`"chrome-cdp"`)·`cdpUrl` 옵션이나 `KSKILL_BROWSER_PROVIDER` 환경변수로 선택.
 2. **Local Playwright launch fallback** — runtime provider 가 모두 닿지 않으면(`UNAVAILABLE`/probe 실패) 기존처럼 `chromium.launch({ headless })` 로 로컬 브라우저를 직접 띄운다. `rebrowser-playwright`/`playwright-core` 필요.
 
 정리(safety):

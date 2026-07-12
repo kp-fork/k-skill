@@ -15,13 +15,33 @@ test("exports Aside, BrowserOS, and Chrome CDP defaults", () => {
   assert.equal(runtime.DEFAULT_CHROME_CDP_URL, "http://127.0.0.1:9222")
 })
 
-test("resolves the auto provider by default (BrowserOS, Aside, Chrome CDP order)", () => {
+test("resolves platform-specific auto provider orders", () => {
   assert.equal(runtime.normalizeProvider(), "auto")
   assert.equal(runtime.PROVIDERS.AUTO, "auto")
   assert.equal(runtime.resolveCdpUrl("aside"), null)
   assert.equal(runtime.resolveCdpUrl("browseros"), "http://127.0.0.1:9100")
   assert.equal(runtime.resolveCdpUrl("chrome-cdp"), "http://127.0.0.1:9222")
   assert.deepEqual(runtime.AUTO_ORDER, ["browseros", "aside", "chrome-cdp"])
+  assert.deepEqual(runtime.resolveAutoOrder("darwin"), ["aside", "browseros", "chrome-cdp"])
+  assert.deepEqual(runtime.resolveAutoOrder("linux"), ["browseros", "aside", "chrome-cdp"])
+})
+
+test("macOS auto provider selects Aside before an available BrowserOS session", async () => {
+  const probeCalls = []
+  const asideProbe = async () => { probeCalls.push("aside"); return { ok: true } }
+  const asideConnectLoader = async () => ({ aside: true })
+  const probe = async (url) => { probeCalls.push(url); return { ok: true, url } }
+
+  const result = await runtime.connect({
+    provider: "auto",
+    platform: "darwin",
+    probe,
+    asideProbe,
+    asideConnectLoader
+  })
+
+  assert.equal(result.provider, "aside")
+  assert.deepEqual(probeCalls, ["aside"])
 })
 
 test("auto provider prefers BrowserOS when its endpoint probes ok", async () => {
@@ -29,7 +49,7 @@ test("auto provider prefers BrowserOS when its endpoint probes ok", async () => 
   const connectCalls = []
   const probe = async (url) => { probeCalls.push(url); return { ok: true, url } }
   const connectLoader = async (url) => { connectCalls.push(url); return { url } }
-  const result = await runtime.connect({ provider: "auto", probe, connectLoader })
+  const result = await runtime.connect({ provider: "auto", platform: "linux", probe, connectLoader })
   assert.equal(result.provider, "browseros")
   assert.equal(result.cdpUrl, "http://127.0.0.1:9100")
   assert.deepEqual(probeCalls, ["http://127.0.0.1:9100"])
@@ -42,7 +62,7 @@ test("auto provider falls back to Chrome CDP when BrowserOS and Aside probes fai
   const probe = async (url) => { probeCalls.push(url); return { ok: /9222/.test(url), url } }
   const asideProbe = async () => { probeCalls.push("aside"); return { ok: false } }
   const connectLoader = async (url) => { connectCalls.push(url); return { url } }
-  const result = await runtime.connect({ provider: "auto", probe, asideProbe, connectLoader })
+  const result = await runtime.connect({ provider: "auto", platform: "linux", probe, asideProbe, connectLoader })
   assert.equal(result.provider, "chrome-cdp")
   assert.equal(result.cdpUrl, "http://127.0.0.1:9222")
   assert.deepEqual(probeCalls, ["http://127.0.0.1:9100", "aside", "http://127.0.0.1:9222"])
@@ -56,7 +76,7 @@ test("auto provider prefers Aside before Chrome CDP when BrowserOS is unavailabl
   const asideProbe = async () => { probeCalls.push("aside"); return { ok: true } }
   const connectLoader = async (url) => { connectCalls.push(url); return { url } }
   const asideConnectLoader = async () => { connectCalls.push("aside"); return { aside: true } }
-  const result = await runtime.connect({ provider: "auto", probe, asideProbe, connectLoader, asideConnectLoader })
+  const result = await runtime.connect({ provider: "auto", platform: "linux", probe, asideProbe, connectLoader, asideConnectLoader })
   assert.equal(result.provider, "aside")
   assert.equal(result.cdpUrl, null)
   assert.deepEqual(probeCalls, ["http://127.0.0.1:9100", "aside"])
@@ -96,7 +116,7 @@ test("auto provider with probe:false connects to BrowserOS, then Aside, then Chr
     connectCalls.push("aside")
     throw new Error("aside not running")
   }
-  const result = await runtime.connect({ provider: "auto", probe: false, connectLoader, asideConnectLoader })
+  const result = await runtime.connect({ provider: "auto", platform: "linux", probe: false, connectLoader, asideConnectLoader })
   assert.equal(result.provider, "chrome-cdp")
   assert.deepEqual(connectCalls, ["http://127.0.0.1:9100", "aside", "http://127.0.0.1:9222"])
 })
@@ -109,7 +129,7 @@ test("auto provider with probe:false uses Aside before Chrome CDP when BrowserOS
     return { url }
   }
   const asideConnectLoader = async () => { connectCalls.push("aside"); return { aside: true } }
-  const result = await runtime.connect({ provider: "auto", probe: false, connectLoader, asideConnectLoader })
+  const result = await runtime.connect({ provider: "auto", platform: "linux", probe: false, connectLoader, asideConnectLoader })
   assert.equal(result.provider, "aside")
   assert.deepEqual(connectCalls, ["http://127.0.0.1:9100", "aside"])
   assert.equal(result.browser.aside, true)
@@ -124,6 +144,7 @@ test("auto provider with probe:false falls through to Chrome CDP when Aside CLI 
   }
   const result = await runtime.connect({
     provider: "auto",
+    platform: "linux",
     probe: false,
     asideCommand: "/definitely/missing/k-skill-aside",
     asideTimeoutMs: 100,
@@ -200,6 +221,7 @@ test("auto provider throws UNAVAILABLE when neither BrowserOS nor Chrome CDP is 
   await assert.rejects(
     () => runtime.connect({
       provider: "auto",
+      platform: "linux",
       probe: async () => ({ ok: false }),
       asideProbe: async () => ({ ok: false }),
       connectLoader: async () => ({})
@@ -322,7 +344,7 @@ test("connect uses default BrowserOS URL with injected probe and connect loaders
   const connectCalls = []
   const probe = async (url) => { probeCalls.push(url); return { ok: true, url } }
   const connectLoader = async (url) => { connectCalls.push(url); return { url } }
-  const result = await runtime.connect({ probe, connectLoader })
+  const result = await runtime.connect({ platform: "linux", probe, connectLoader })
   assert.equal(result.provider, "browseros")
   assert.equal(result.cdpUrl, "http://127.0.0.1:9100")
   assert.deepEqual(probeCalls, ["http://127.0.0.1:9100"])
@@ -348,6 +370,7 @@ test("connect skips probe when probe is false and still calls connectLoader", as
   // 127.0.0.1:9100) is skipped, so reaching connectLoader proves the skip.
   const connectCalls = []
   const result = await runtime.connect({
+    platform: "linux",
     probe: false,
     connectLoader: async (url) => { connectCalls.push(url); return { url, ok: true } }
   })

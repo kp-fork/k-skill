@@ -63,11 +63,11 @@ chmod 0600 ~/.config/k-skill/secrets.env
 
 ## 브라우저 런타임 (BrowserOS)
 
-브라우저 세션이 필요한 스킬(`hipass-receipt`, `court-auction-notice-search`, `court-payment-order-assistant`)은 `k-skill-browser-runtime`을 기본 런타임으로 쓴다. 기본 `auto` 순서는 BrowserOS CDP → Aside Browser REPL → Chrome/Chromium CDP다. 런타임은 BrowserOS를 launch하거나 headless로 띄우지 않고, Aside는 공개 `aside repl` 표면만 쓴다. 자세한 작성 가이드는 [브라우저 런타임 문서](browser-runtime.md)와 [새 스킬 추가 가이드](adding-a-skill.md)를 참고.
+브라우저 세션이 필요한 스킬(`hipass-receipt`, `court-auction-notice-search`, `court-payment-order-assistant`)은 `k-skill-browser-runtime`을 기본 런타임으로 쓴다. 기본 `auto` 순서는 macOS에서 Aside Browser REPL → BrowserOS CDP → Chrome/Chromium CDP, 기타 플랫폼에서 BrowserOS CDP → Aside Browser REPL → Chrome/Chromium CDP다. 런타임은 BrowserOS를 launch하거나 headless로 띄우지 않고, Aside는 공개 `aside repl` 표면만 쓴다. 자세한 작성 가이드는 [브라우저 런타임 문서](browser-runtime.md)와 [새 스킬 추가 가이드](adding-a-skill.md)를 참고.
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `KSKILL_BROWSER_PROVIDER` | `auto` | `auto`(BrowserOS → Aside Browser → Chrome CDP), `browseros`, `aside`, `chrome-cdp` |
+| `KSKILL_BROWSER_PROVIDER` | `auto` | `auto`(macOS: Aside → BrowserOS → Chrome, 기타: BrowserOS → Aside → Chrome), `browseros`, `aside`, `chrome-cdp` |
 | `KSKILL_BROWSEROS_CDP_URL` | `http://127.0.0.1:9100` | BrowserOS CDP 엔드포인트 |
 | `KSKILL_CHROME_CDP_URL` | `http://127.0.0.1:9222` | Chrome/Chromium CDP 엔드포인트 |
 | `KSKILL_ASIDE_COMMAND` | `aside` | Aside CLI 명령 이름 또는 경로 |
@@ -100,7 +100,7 @@ bash scripts/check-setup.sh
 | 한국 부동산 실거래가 조회 | 사용자 시크릿 불필요 (기본 hosted proxy 사용) |
 | 한국 특허 정보 검색 | `KIPRIS_PLUS_API_KEY` |
 | 팝빌 업무 API | `KSKILL_POPBILL_LINK_ID`, `KSKILL_POPBILL_SECRET_KEY`, `KSKILL_POPBILL_CORP_NUM`, 선택 `KSKILL_POPBILL_USER_ID` |
-| 하이패스 영수증 발급 | 사용자 시크릿 불필요 (기본 `auto`: BrowserOS CDP → Aside Browser → Chrome CDP 세션에서 수동 로그인, [브라우저 런타임](browser-runtime.md) 참고) |
+| 하이패스 영수증 발급 | 사용자 시크릿 불필요 (플랫폼별 `auto` 세션에서 수동 로그인, [브라우저 런타임](browser-runtime.md) 참고) |
 | 한국 주식 정보 조회 | 사용자 시크릿 불필요 (기본 hosted proxy 사용, 운영자만 `KRX_API_KEY`) |
 | 근처 가장 싼 주유소 찾기 | 사용자 시크릿 불필요 (기본 hosted proxy 사용) |
 | 서울 지하철 도착정보 조회 | 사용자 시크릿 불필요 (기본 hosted proxy 사용, 운영자만 `SEOUL_OPEN_API_KEY`) |

@@ -16,6 +16,11 @@ const DEFAULT_BROWSEROS_CDP_URL = "http://127.0.0.1:9100"
 const DEFAULT_CHROME_CDP_URL = "http://127.0.0.1:9222"
 
 const AUTO_ORDER = Object.freeze([PROVIDERS.BROWSEROS, PROVIDERS.ASIDE, PROVIDERS.CHROME_CDP])
+const DARWIN_AUTO_ORDER = Object.freeze([PROVIDERS.ASIDE, PROVIDERS.BROWSEROS, PROVIDERS.CHROME_CDP])
+
+function resolveAutoOrder(platform = process.platform) {
+  return platform === "darwin" ? DARWIN_AUTO_ORDER : AUTO_ORDER
+}
 
 function normalizeProvider(provider) {
   return String(provider || process.env.KSKILL_BROWSER_PROVIDER || PROVIDERS.AUTO).trim() || PROVIDERS.AUTO
@@ -95,10 +100,11 @@ async function connectSingle(provider, options = {}) {
 
 async function connectAuto(options = {}) {
   const connectFn = resolveConnectFn(options)
+  const autoOrder = resolveAutoOrder(options.platform)
 
   if (options.probe === false) {
     let lastError
-    for (const provider of AUTO_ORDER) {
+    for (const provider of autoOrder) {
       if (provider === PROVIDERS.ASIDE) {
         try {
           const browser = await connectAside(options)
@@ -108,7 +114,7 @@ async function connectAuto(options = {}) {
           continue
         }
       }
-      const cdpUrl = resolveCdpUrl(provider)
+      const cdpUrl = resolveCdpUrl(provider, options)
       try {
         const browser = await connectFn(cdpUrl, options)
         return { provider, cdpUrl, browser }
@@ -117,8 +123,8 @@ async function connectAuto(options = {}) {
       }
     }
     const err = createUnavailableError(
-      "Browser runtime is unavailable for auto provider (tried BrowserOS, Aside Browser, then Chrome CDP).",
-      { order: AUTO_ORDER }
+      `Browser runtime is unavailable for auto provider (tried ${autoOrder.join(", ")}).`,
+      { order: autoOrder }
     )
     if (lastError) err.cause = lastError
     throw err
@@ -126,7 +132,7 @@ async function connectAuto(options = {}) {
 
   const probeFn = typeof options.probe === "function" ? options.probe : probeCdp
   let lastProbe
-  for (const provider of AUTO_ORDER) {
+  for (const provider of autoOrder) {
     if (provider === PROVIDERS.ASIDE) {
       const probe = await probeAside(options)
       if (probe.ok) {
@@ -136,7 +142,7 @@ async function connectAuto(options = {}) {
       lastProbe = probe
       continue
     }
-    const cdpUrl = resolveCdpUrl(provider)
+    const cdpUrl = resolveCdpUrl(provider, options)
     const probe = await probeFn(cdpUrl, options)
     if (probe.ok) {
       const browser = await connectFn(cdpUrl, options)
@@ -145,8 +151,8 @@ async function connectAuto(options = {}) {
     lastProbe = probe
   }
   throw createUnavailableError(
-    "Browser runtime is unavailable for auto provider (tried BrowserOS, Aside Browser, then Chrome CDP).",
-    { order: AUTO_ORDER, probe: lastProbe }
+    `Browser runtime is unavailable for auto provider (tried ${autoOrder.join(", ")}).`,
+    { order: autoOrder, probe: lastProbe }
   )
 }
 
@@ -163,6 +169,8 @@ module.exports = {
   DEFAULT_BROWSEROS_CDP_URL,
   DEFAULT_CHROME_CDP_URL,
   AUTO_ORDER,
+  DARWIN_AUTO_ORDER,
+  resolveAutoOrder,
   normalizeProvider,
   isKnownProvider,
   resolveCdpUrl,

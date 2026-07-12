@@ -1,10 +1,10 @@
 # k-skill-browser-runtime
 
-Browser runtime adapter for k-skill packages, with BrowserOS first and Aside Browser before Chrome CDP fallback.
+Browser runtime adapter for k-skill packages, with platform-aware automatic provider selection.
 
 ## Scope
 
-- The recommended default is `auto`: prefer a user-launched BrowserOS session, then Aside Browser when available, then a Chrome/Chromium CDP session.
+- The recommended default is `auto`: macOS prefers Aside Browser, then BrowserOS, then Chrome/Chromium CDP. Other platforms preserve BrowserOS, Aside Browser, then Chrome/Chromium CDP.
 - BrowserOS is used as a GUI/session browser over CDP, not as a headless backend, CAPTCHA bypass, login solver, payment solver, or stealth scraping browser.
 - The `browseros` provider connects to a user-launched BrowserOS session. It never launches BrowserOS and never passes headless flags.
 - The `aside` provider uses the public `aside repl` CLI surface. It does not rely on undocumented local ports or a private CDP endpoint.
@@ -14,7 +14,7 @@ Browser runtime adapter for k-skill packages, with BrowserOS first and Aside Bro
 
 | Provider | Default surface | Launches browser | Intended use |
 | --- | --- | --- | --- |
-| `auto` (default) | BrowserOS `9100`, then `aside repl`, then Chrome `9222` | No | Recommended fallback order |
+| `auto` (default) | macOS: `aside repl`, BrowserOS `9100`, Chrome `9222`; other platforms: BrowserOS, Aside, Chrome | No | Platform-aware fallback order |
 | `browseros` | `http://127.0.0.1:9100` | No | Force a user-launched BrowserOS GUI/session browser |
 | `aside` | `aside repl` | No | Force an available Aside Browser session through the documented CLI REPL |
 | `chrome-cdp` | `http://127.0.0.1:9222` | No | Force a Chrome/Chromium CDP session |

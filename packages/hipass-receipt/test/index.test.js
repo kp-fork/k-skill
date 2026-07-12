@@ -266,6 +266,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
       encoding: "utf8",
       env: {
         ...process.env,
+        KSKILL_BROWSER_PROVIDER: "chrome-cdp",
         NODE_OPTIONS: `${process.env.NODE_OPTIONS ? `${process.env.NODE_OPTIONS} ` : ""}--require ${mockHookPath}`
       }
     },
@@ -328,6 +329,7 @@ test("listUsageHistory uses the absolute usage-history URL and closes the browse
   const parsed = await listUsageHistory({
     startDate: "2026-04-01",
     endDate: "2026-04-07",
+    platform: "linux",
     probe: false,
     connectLoader: async () => browser
   });
@@ -411,6 +413,7 @@ test("openReceiptPopup uses the receipt flow and closes the browser connection",
     startDate: "2026-04-01",
     endDate: "2026-04-07",
     rowIndex: 1,
+    platform: "linux",
     probe: false,
     connectLoader: async () => browser
   });

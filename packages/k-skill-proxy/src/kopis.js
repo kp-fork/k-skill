@@ -1,4 +1,4 @@
-const KOPIS_BASE_URL = "https://www.kopis.or.kr/openApi/restful";
+const KOPIS_BASE_URL = "https://kopis.or.kr/openApi/restful";
 
 const KOPIS_LIST_OPERATIONS = new Set(["performances", "facilities"]);
 

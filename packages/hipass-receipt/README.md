@@ -15,13 +15,13 @@
 npm install hipass-receipt
 ```
 
-이 패키지는 [`k-skill-browser-runtime`](../k-skill-browser-runtime) 런타임 어댑터로 브라우저에 연결하고 `playwright-core`를 CDP 클라이언트로 함께 설치한다. 기본 순서는 사용자가 띄운 BrowserOS CDP, Aside Browser REPL, Chrome/Chromium CDP다.
+이 패키지는 [`k-skill-browser-runtime`](../k-skill-browser-runtime) 런타임 어댑터로 브라우저에 연결하고 `playwright-core`를 CDP 클라이언트로 함께 설치한다. 기본 `auto` 순서는 macOS에서 Aside Browser REPL, BrowserOS CDP, Chrome/Chromium CDP이며 기타 플랫폼에서는 BrowserOS가 먼저다.
 
 ## Browser runtime
 
 `connectToChrome()` / `listUsageHistory()` / `openReceiptPopup()` 는 `k-skill-browser-runtime` 어댑터를 통해 연결한다.
 
-- 기본 provider 는 `auto` 로, BrowserOS CDP(`http://127.0.0.1:9100`) → Aside Browser(`aside repl`) → Chrome CDP(`http://127.0.0.1:9222`) 순서다.
+- 기본 provider 는 `auto` 로, macOS는 Aside Browser(`aside repl`) → BrowserOS CDP(`http://127.0.0.1:9100`) → Chrome CDP(`http://127.0.0.1:9222`), 기타 플랫폼은 BrowserOS → Aside → Chrome 순서다.
 - `KSKILL_BROWSER_PROVIDER=browseros` / `=aside` / `=chrome-cdp` 환경변수 또는 `options.provider` 로 특정 provider 를 고정할 수 있다. `--cdp-url`(`options.cdpUrl`)을 넘기면 그 URL(사용자가 `chrome-command`로 띄운 Chrome 등)에 직접 붙는다. `KSKILL_BROWSEROS_CDP_URL` / `KSKILL_CHROME_CDP_URL` 로 각 CDP URL 을 덮어쓸 수 있고, `KSKILL_ASIDE_COMMAND` 로 Aside CLI 명령을 바꿀 수 있다.
 - `options.cdpUrl` 을 넘기면 provider 기본 URL 대신 해당 URL 로 연결한다.
 - 정리(cleanup) 시 어댑터는 `browser.disconnect()` 만 호출하고 사용자 브라우저/프로필을 닫지 않는다. BrowserOS 클라이언트는 `disconnect()` 를 노출하며, Playwright CDP Browser 는 `disconnect()` 가 없을 때 런타임이 안전하게 거부(refuse)한다 — 이 경우 로그인된 Chrome 세션은 그대로 유지되며 연결 해제는 프로세스 종료 시 처리된다.

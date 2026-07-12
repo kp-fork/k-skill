@@ -1,10 +1,10 @@
 # 브라우저 런타임 (k-skill-browser-runtime)
 
-브라우저 세션이 필요한 k-skill 패키지는 `k-skill-browser-runtime`을 기본 런타임으로 쓴다. 이 런타임은 BrowserOS를 먼저 쓰고, Aside Browser가 있으면 Chrome/Chromium CDP보다 먼저 쓰는 브라우저 어댑터다. 사이트별 로직은 각 스킬에 두고 공통 브라우저 연결·stop rule만 담당한다.
+브라우저 세션이 필요한 k-skill 패키지는 `k-skill-browser-runtime`을 기본 런타임으로 쓴다. macOS에서는 Aside Browser를 먼저 쓰고, 다른 플랫폼에서는 BrowserOS를 먼저 쓰며, 둘 다 Chrome/Chromium CDP보다 우선한다. 사이트별 로직은 각 스킬에 두고 공통 브라우저 연결·stop rule만 담당한다.
 
 ## 기본 동작
 
-- **기본 순서**: `auto`는 사용자가 직접 띄운 BrowserOS CDP 세션을 먼저 시도하고, 닿지 않으면 Aside Browser의 공개 `aside repl` 표면을 시도한 뒤, 마지막으로 Chrome/Chromium CDP로 fallback 한다.
+- **기본 순서**: macOS `auto`는 Aside Browser → BrowserOS CDP → Chrome/Chromium CDP다. 다른 플랫폼은 BrowserOS CDP → Aside Browser → Chrome/Chromium CDP 순서를 유지한다.
 - **BrowserOS CDP attach**: 사용자가 직접 띄운 BrowserOS GUI 세션에 CDP로 붙는다. 런타임이 BrowserOS를 launch하거나 headless 플래그를 전달하지 않는다.
 - **Aside Browser REPL**: Aside는 문서화된 CLI REPL 표면으로만 사용한다. 비공개 localhost port, daemon auth, undocumented CDP endpoint에 의존하지 않는다.
 - **Provider 선택**: `KSKILL_BROWSER_PROVIDER` 로 `auto`(기본), `browseros`, `aside`, `chrome-cdp` 를 고른다. 알 수 없는 provider 이름은 `UNKNOWN_PROVIDER` 에러로 fail-closed 된다.
@@ -44,17 +44,17 @@
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `KSKILL_BROWSER_PROVIDER` | `auto` | `auto`(BrowserOS → Aside Browser → Chrome CDP), `browseros`, `aside`, `chrome-cdp` |
+| `KSKILL_BROWSER_PROVIDER` | `auto` | `auto`(macOS: Aside → BrowserOS → Chrome, 기타: BrowserOS → Aside → Chrome), `browseros`, `aside`, `chrome-cdp` |
 | `KSKILL_BROWSEROS_CDP_URL` | `http://127.0.0.1:9100` | BrowserOS CDP 엔드포인트 |
 | `KSKILL_CHROME_CDP_URL` | `http://127.0.0.1:9222` | Chrome/Chromium CDP 엔드포인트 |
 | `KSKILL_ASIDE_COMMAND` | `aside` | Aside CLI 명령 이름 또는 경로 |
 
 ## 브라우저가 필요한 패키지
 
-- `hipass-receipt` — 하이패스 로그인 세션에서 사용내역/영수증 조회 (기본 `auto`: BrowserOS → Aside Browser → Chrome CDP)
-- `court-auction-notice-search` — 법원경매 직접 HTTP 1차, 브라우저 fallback (BrowserOS/runtime CDP → Aside Browser → Chrome CDP → 로컬 launch)
+- `hipass-receipt` — 하이패스 로그인 세션에서 사용내역/영수증 조회 (macOS `auto`: Aside → BrowserOS → Chrome, 기타 플랫폼은 BrowserOS 우선)
+- `court-auction-notice-search` — 법원경매 직접 HTTP 1차, 플랫폼별 runtime browser fallback 후 로컬 launch
 - `court-payment-order-assistant` — 전자소송 지급명령 로그인 이후 handoff (BrowserOS CDP → 수동)
-- `yebigun-training` — 예비군 로그인 세션에서 훈련정보 조회 (기본 `auto`: BrowserOS → Aside Browser → Chrome CDP)
+- `yebigun-training` — 예비군 로그인 세션에서 훈련정보 조회 (macOS `auto`: Aside → BrowserOS → Chrome, 기타 플랫폼은 BrowserOS 우선)
 
 ## 이 런타임 밖에 있는 브라우저 스킬
 

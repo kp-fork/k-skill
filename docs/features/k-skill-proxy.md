@@ -43,6 +43,9 @@ client/skill -> k-skill-proxy -> upstream public API
 - `GET /v1/kstartup/announcements` (창업진흥원 K-Startup 지원사업 공고 정보, `DATA_GO_KR_API_KEY`)
 - `GET /v1/kstartup/contents` (창업진흥원 K-Startup 창업 콘텐츠 정보, `DATA_GO_KR_API_KEY`)
 - `GET /v1/kstartup/statistics` (창업진흥원 K-Startup 통계보고서 정보, `DATA_GO_KR_API_KEY`)
+- `GET /v1/kr-whois/domain` (KISA WHOIS `.kr`/`.한국` 도메인 조회, `DATA_GO_KR_API_KEY`)
+- `GET /v1/kr-whois/ip` (KISA WHOIS IPv4/IPv6 조회, `DATA_GO_KR_API_KEY`)
+- `GET /v1/kr-whois/as` (KISA WHOIS AS 번호 조회, `DATA_GO_KR_API_KEY`)
 - `GET /B552584/:service/:operation` (허용된 AirKorea route passthrough)
 
 ## 권장 환경변수
@@ -59,7 +62,7 @@ client/skill -> k-skill-proxy -> upstream public API
 - `SEOUL_OPEN_API_KEY=...`
 - `HRFCO_OPEN_API_KEY=...`
 - `OPINET_API_KEY=...`
-- `DATA_GO_KR_API_KEY=...`
+- `DATA_GO_KR_API_KEY=...` (WHOIS route는 공공데이터포털 서비스 `15094277` 활용신청 승인 필요)
 - `FOODSAFETYKOREA_API_KEY=...` (선택: 식품안전나라 회수 live 결과, 없으면 sample fallback)
 - `KEDU_INFO_KEY=...` (나이스 교육정보 개방 포털 Open API 인증키)
 - `DATA4LIBRARY_AUTH_KEY=...` (도서관 정보나루 Open API 인증키)

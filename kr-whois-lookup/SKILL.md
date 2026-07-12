@@ -1,6 +1,6 @@
 ---
 name: kr-whois-lookup
-description: 공공데이터포털 WHOIS 도메인 정보 API를 k-skill-proxy 경유로 호출해 .kr/.한국 도메인 등록정보, 네임서버, 상태를 조회한다. 조회 전용.
+description: 공공데이터포털 WHOIS 도메인/IP 정보 API를 k-skill-proxy 경유로 호출해 .kr/.한국 도메인, IP 주소, AS 번호의 공개 등록정보를 조회한다. 조회 전용.
 license: MIT
 metadata:
   category: security
@@ -12,26 +12,28 @@ metadata:
 
 ## What this skill does
 
-공공데이터포털의 **WHOIS 도메인/IP 정보 API**(data.go.kr `15094277`) 중 공식 HTML에서 파라미터가 확인된 도메인 조회 endpoint `B551505/whois/domain_name` 을 `k-skill-proxy` 경유로 호출한다.
+공공데이터포털의 **WHOIS 도메인/IP 정보 API**(data.go.kr `15094277`)의 공식 endpoint를 `k-skill-proxy` 경유로 호출한다.
 
-지원 범위는 `.kr` 및 `.한국` 도메인 WHOIS 조회다. 등록기관, 등록/만료일, 도메인 상태, DNSSEC, 네임서버, 공개 가능한 관리 정보 필드를 원문 기반으로 요약한다.
+지원 범위는 `.kr`/`.한국` 도메인, IPv4/IPv6 주소, `AS1234` 형식의 AS 번호다. 등록기관, 등록/할당일, 상태, 네임서버, 네트워크 범위, 국가 코드 등 공개 가능한 필드를 원문 기반으로 요약한다.
 
 ## When to use
 
 - ".kr 도메인 WHOIS 조회해줘"
 - "kisa.or.kr 등록기관과 만료일 확인해줘"
 - ".한국 도메인 네임서버 확인해줘"
+- "202.30.50.51 IP WHOIS 조회해줘"
+- "AS9700 할당 기관 확인해줘"
 
 ## When not to use
 
 - `.com`, `.net` 등 해외 gTLD WHOIS 조회
 - 개인정보 비공개 우회, 대량 수집, 연락처 자동 추출
-- IP/AS/country lookup: upstream 서비스 설명에는 포함되지만 공식 공개 HTML에서 세부 subpath와 파라미터가 확정되지 않아 v1 범위에서 제외한다.
+- 역방향 DNS, 지리 좌표, 위협 인텔리전스, 포트 스캔처럼 WHOIS 공개 등록정보가 아닌 조회
 
 ## Prerequisites
 
 - 인터넷 연결
-- hosted/self-host `k-skill-proxy`의 `/v1/kr-whois/domain` route 접근 가능
+- hosted/self-host `k-skill-proxy`의 `/v1/kr-whois/domain`, `/v1/kr-whois/ip`, `/v1/kr-whois/as` route 접근 가능
 
 ## Credential requirements
 
@@ -43,13 +45,15 @@ metadata:
 
 ## Inputs
 
-- `domain`, `query`, 또는 `q`: 조회할 `.kr`/`.한국` 도메인
+- 도메인: `domain`, `query`, 또는 `q`에 조회할 `.kr`/`.한국` 도메인
+- IP: `ip`, `query`, 또는 `q`에 유효한 IPv4/IPv6 주소
+- AS: `asn`, `as`, `query`, 또는 `q`에 `AS9700` 같은 `AS<digits>` 형식의 AS 번호
 
 ## Workflow
 
-### 1. Normalize the domain
+### 1. Classify and normalize the query
 
-사용자가 URL을 주면 scheme/path를 제거하고 도메인만 남긴다. `.kr` 또는 `.한국` 이 아니면 이 스킬을 쓰지 않는다.
+도메인 URL은 scheme/path를 제거하고 `.kr`/`.한국` 도메인만 남긴다. IP는 유효한 IPv4/IPv6인지 검증한다. AS 번호는 대소문자와 공백을 정리해 `AS<digits>` 형식으로 만든다.
 
 ### 2. Query through the proxy
 
@@ -57,6 +61,12 @@ metadata:
 BASE="${KSKILL_PROXY_BASE_URL:-https://k-skill-proxy.nomadamas.org}"
 curl -fsS --get "$BASE/v1/kr-whois/domain" \
   --data-urlencode "domain=kisa.or.kr"
+
+curl -fsS --get "$BASE/v1/kr-whois/ip" \
+  --data-urlencode "ip=202.30.50.51"
+
+curl -fsS --get "$BASE/v1/kr-whois/as" \
+  --data-urlencode "asn=AS9700"
 ```
 
 ### 3. Summarize public fields only
@@ -64,26 +74,28 @@ curl -fsS --get "$BASE/v1/kr-whois/domain" \
 응답에서 다음 필드를 우선 확인한다.
 
 - `result_code`, `result_msg`: upstream 결과
-- `name`, `regName`, `agency`, `agency_url`
+- 공통: `query`, `queryType`, `result_code`, `result_msg`
+- 도메인: `name`, `regName`, `agency`, `agency_url`
 - `regDate`, `endDate`, `lastUpdatedDate`
 - `domainStatus`, `dnssec`
 - `ns1`, `ns2`, `ip1`, `ip2` 등 네임서버/주소 필드
+- IP/AS: 할당 기관, 네트워크 범위, 국가 코드, 할당일과 공개 연락처 필드
 
 개인 연락처로 보이는 값은 그대로 확산하지 말고, 공개 API 응답에 포함된 정보라는 점과 남용 금지 문구를 함께 둔다.
 
 ## Failure modes
 
-- `400 bad_request`: 도메인이 없거나 `.kr`/`.한국` 도메인이 아님.
+- `400 bad_request`: 필수 입력이 없거나 도메인/IP/AS 형식이 올바르지 않음.
 - `503 upstream_not_configured`: 프록시 서버에 `DATA_GO_KR_API_KEY` 가 없거나 15094277 활용신청이 승인되지 않음.
 - `502 upstream_forbidden`: data.go.kr gateway가 키를 거부함(`SERVICE KEY IS NOT REGISTERED ERROR` 등).
-- upstream `result_code`가 `10000`이 아님: `result_msg`를 그대로 확인하고 도메인 철자/지원 TLD를 점검한다.
-- 빈 결과: 등록되지 않았거나 WHOIS가 공개하지 않는 도메인일 수 있다.
+- upstream `result_code`가 `10000`이 아님: `result_msg`를 확인하고 입력 형식과 할당 여부를 점검한다.
+- 빈 결과: 등록·할당되지 않았거나 WHOIS가 공개하지 않는 대상일 수 있다.
 
 ## Done when
 
-- `.kr`/`.한국` 도메인만 조회했다.
+- 입력 유형에 맞는 domain/IP/AS route를 사용했다.
 - `k-skill-proxy` route를 통해 호출했고 사용자에게 API key를 요구하지 않았다.
-- 등록기관, 등록/만료일, 상태, 네임서버를 원문 필드 기준으로 요약했다.
+- 등록·할당 기관, 날짜, 상태, 네임서버 또는 네트워크 범위를 원문 필드 기준으로 요약했다.
 - 개인정보·연락처 필드는 남용 금지와 공개 원천 한계를 함께 설명했다.
 
 ## Maintainer review notes
@@ -92,7 +104,11 @@ curl -fsS --get "$BASE/v1/kr-whois/domain" \
 
 - `./scripts/validate-skills.sh`
 - `node --test packages/k-skill-proxy/test/server.test.js`
-- `curl -fsS --get "$KSKILL_PROXY_BASE_URL/v1/kr-whois/domain" --data-urlencode "domain=kisa.or.kr"` (hosted/self-host proxy에 `DATA_GO_KR_API_KEY`와 15094277 활용신청이 있을 때 live smoke)
+- `curl -fsS --get "$KSKILL_PROXY_BASE_URL/v1/kr-whois/domain" --data-urlencode "domain=kisa.or.kr"`
+- `curl -fsS --get "$KSKILL_PROXY_BASE_URL/v1/kr-whois/ip" --data-urlencode "ip=202.30.50.51"`
+- `curl -fsS --get "$KSKILL_PROXY_BASE_URL/v1/kr-whois/as" --data-urlencode "asn=AS9700"`
+
+위 live smoke는 hosted/self-host proxy에 `DATA_GO_KR_API_KEY`와 15094277 활용신청이 있을 때 수행한다. 공식 upstream 경로는 각각 `B551505/whois/domain_name`, `B551505/whois/ip_address`, `B551505/whois/as_number`다.
 
 ## Safety notes
 

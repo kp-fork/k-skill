@@ -68,7 +68,15 @@ const {
   proxyNhisLongTermCareRequest
 } = require("./nhis-care");
 const { isKopisErrorBody, normalizeKopisDetailQuery, normalizeKopisListQuery, proxyKopisRequest } = require("./kopis");
-const { normalizeKrWhoisDomainQuery, proxyKrWhoisDomainRequest } = require("./kr-whois");
+const {
+  isKrWhoisSuccessBody,
+  normalizeKrWhoisAsQuery,
+  normalizeKrWhoisDomainQuery,
+  normalizeKrWhoisIpQuery,
+  proxyKrWhoisAsRequest,
+  proxyKrWhoisDomainRequest,
+  proxyKrWhoisIpRequest
+} = require("./kr-whois");
 const AIR_KOREA_UPSTREAM_BASE_URL = "http://apis.data.go.kr";
 const DATA_GO_KR_UPSTREAM_BASE_URL = "https://apis.data.go.kr";
 const DATA4LIBRARY_UPSTREAM_BASE_URL = "https://data4library.kr/api";
@@ -2735,10 +2743,70 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
       serviceKey: config.molitApiKey
     });
 
-    if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300 && isKrWhoisSuccessBody(upstream.body)) {
       cache.set(cacheKey, upstream, config.cacheTtlMs);
     }
 
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  });
+
+  app.get("/v1/kr-whois/ip", async (request, reply) => {
+    let normalized;
+
+    try {
+      normalized = normalizeKrWhoisIpQuery(request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return { error: "bad_request", message: error.message };
+    }
+
+    const cacheKey = makeCacheKey({ route: "kr-whois-ip", ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyKrWhoisIpRequest({
+      params: normalized,
+      serviceKey: config.molitApiKey
+    });
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300 && isKrWhoisSuccessBody(upstream.body)) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
+    reply.code(upstream.statusCode);
+    reply.header("content-type", upstream.contentType);
+    return upstream.body;
+  });
+
+  app.get("/v1/kr-whois/as", async (request, reply) => {
+    let normalized;
+
+    try {
+      normalized = normalizeKrWhoisAsQuery(request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return { error: "bad_request", message: error.message };
+    }
+
+    const cacheKey = makeCacheKey({ route: "kr-whois-as", ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      reply.code(cached.statusCode);
+      reply.header("content-type", cached.contentType);
+      return cached.body;
+    }
+
+    const upstream = await proxyKrWhoisAsRequest({
+      params: normalized,
+      serviceKey: config.molitApiKey
+    });
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300 && isKrWhoisSuccessBody(upstream.body)) {
+      cache.set(cacheKey, upstream, config.cacheTtlMs);
+    }
     reply.code(upstream.statusCode);
     reply.header("content-type", upstream.contentType);
     return upstream.body;
@@ -5462,7 +5530,9 @@ module.exports = {
   normalizeKopisDetailQuery,
   normalizeKopisListQuery,
   normalizeKstartupQuery,
+  normalizeKrWhoisAsQuery,
   normalizeKrWhoisDomainQuery,
+  normalizeKrWhoisIpQuery,
   normalizeNhisCheckupQuery,
   normalizeNhisLongTermCareQuery,
   normalizeKoreanStockLookupQuery,

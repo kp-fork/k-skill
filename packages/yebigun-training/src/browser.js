@@ -56,7 +56,7 @@ function resolveYebigunProvider(options = {}) {
   }
   // An explicit --cdp-url points at a specific browser the user launched (Chrome
   // via `yebigun-training chrome-command`), so target it directly. Otherwise use the
-  // recommended default: prefer a user-launched BrowserOS session, fall back to Chrome CDP.
+  // recommended platform-aware auto provider order.
   if (options.cdpUrl) {
     return PROVIDERS.CHROME_CDP
   }
@@ -67,6 +67,9 @@ async function connectToChrome(options = {}) {
   const connectOptions = {
     provider: resolveYebigunProvider(options),
     probe: options.probe === undefined ? false : options.probe
+  }
+  if (options.platform) {
+    connectOptions.platform = options.platform
   }
   if (options.cdpUrl) {
     connectOptions.cdpUrl = options.cdpUrl

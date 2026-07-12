@@ -21,13 +21,13 @@
 npm install hipass-receipt
 ```
 
-배포 패키지는 브라우저 연결을 `k-skill-browser-runtime`으로 처리하고 `playwright-core`를 CDP 클라이언트로 함께 설치한다. 기본 순서는 사용자가 직접 연 BrowserOS CDP, Aside Browser REPL, Chrome/Chromium CDP다.
+배포 패키지는 브라우저 연결을 `k-skill-browser-runtime`으로 처리하고 `playwright-core`를 CDP 클라이언트로 함께 설치한다. 기본 `auto` 순서는 macOS에서 Aside Browser REPL, BrowserOS CDP, Chrome/Chromium CDP이며 기타 플랫폼에서는 BrowserOS가 먼저다.
 
 이 레포를 clone 한 유지보수자라면 루트에서 `npm install` 로 workspace 패키지까지 함께 설치해도 된다.
 
 ## 브라우저 런타임
 
-기본값은 `auto` provider다. BrowserOS CDP(`http://127.0.0.1:9100`) → Aside Browser(`aside repl`) → Chrome CDP(`http://127.0.0.1:9222`) 순서다. `hipass-receipt chrome-command` 로 전용 Chrome 프로필을 띄우고 `--cdp-url http://127.0.0.1:9222` 로 붙이는 흐름은 그대로 유지된다.
+기본값은 `auto` provider다. macOS는 Aside Browser(`aside repl`) → BrowserOS CDP(`http://127.0.0.1:9100`) → Chrome CDP(`http://127.0.0.1:9222`), 기타 플랫폼은 BrowserOS → Aside → Chrome 순서다. `hipass-receipt chrome-command` 로 전용 Chrome 프로필을 띄우고 `--cdp-url http://127.0.0.1:9222` 로 붙이는 흐름은 그대로 유지된다.
 
 특정 provider를 고정하려면 `KSKILL_BROWSER_PROVIDER=browseros`, `=aside`, 또는 `=chrome-cdp`(혹은 `options.provider`)를 지정한다. `--cdp-url`을 주면 그 URL에 직접 붙는다. 런타임은 BrowserOS/Aside를 launch하거나 BrowserOS를 headless로 띄우지 않는다.
 
