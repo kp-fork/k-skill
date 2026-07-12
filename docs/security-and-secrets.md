@@ -32,6 +32,8 @@ KSKILL_KOSIS_API_KEY=replace-me
 KSKILL_KSTARTUP_API_KEY=replace-me
 # EV 충전소 일반 조회는 hosted proxy 사용. --direct 호출 때만 필요.
 KSKILL_EV_CHARGER_API_KEY=replace-me
+# 건축물대장 일반 조회는 hosted proxy 사용. --direct 호출 때만 필요.
+KSKILL_BUILDING_REGISTER_API_KEY=replace-me
 LAW_OC=replace-me
 KIPRIS_PLUS_API_KEY=replace-me
 NAVER_AD_API_KEY=replace-me
@@ -48,7 +50,7 @@ KSKILL_POPBILL_USER_ID=
 KSKILL_PROXY_BASE_URL=
 ```
 
-서울 지하철 도착정보, 서울 실시간 혼잡도 조회, 서울 따릉이 실시간 대여소 조회, 한국 날씨 조회는 `KSKILL_PROXY_BASE_URL` 이 없거나 비어 있으면 기본 hosted proxy(`k-skill-proxy.nomadamas.org`)를 쓰므로 사용자 쪽 키가 불필요하다. 미세먼지, 한강 수위, 주유소 가격, 전기차 충전소 위치·상태, 한국 주식 정보 조회, KOSIS 일반 조회, Kakao Local geocoding, 의약품 안전 체크, 식품 안전 체크, 창업진흥원 K-Startup 조회도 기본 hosted proxy를 쓴다. 생활쓰레기 배출정보는 `k-skill-proxy`의 `/v1/household-waste/info` 라우트를 거쳐 `serviceKey`만 proxy 서버에서 주입하므로 사용자 쪽 키가 불필요하다.
+서울 지하철 도착정보, 서울 실시간 혼잡도 조회, 서울 따릉이 실시간 대여소 조회, 한국 날씨 조회는 `KSKILL_PROXY_BASE_URL` 이 없거나 비어 있으면 기본 hosted proxy(`k-skill-proxy.nomadamas.org`)를 쓰므로 사용자 쪽 키가 불필요하다. 미세먼지, 한강 수위, 주유소 가격, 전기차 충전소 위치·상태, 건축물대장 표제부, 한국 주식 정보 조회, KOSIS 일반 조회, Kakao Local geocoding, 의약품 안전 체크, 식품 안전 체크, 창업진흥원 K-Startup 조회도 기본 hosted proxy를 쓴다. 생활쓰레기 배출정보는 `k-skill-proxy`의 `/v1/household-waste/info` 라우트를 거쳐 `serviceKey`만 proxy 서버에서 주입하므로 사용자 쪽 키가 불필요하다.
 
 ## Missing secret handling policy
 
@@ -84,6 +86,7 @@ KSKILL_PROXY_BASE_URL=
 - `KSKILL_KOSIS_API_KEY` (KOSIS `bigdata`/`--direct`, 또는 proxy 서버 `KOSIS_API_KEY` 대체 env)
 - `KSKILL_KSTARTUP_API_KEY` (창업진흥원 K-Startup `--direct` 호출용. 일반 조회는 hosted proxy의 `DATA_GO_KR_API_KEY` 가 처리)
 - `KSKILL_EV_CHARGER_API_KEY` (전기차 충전소 `--direct` 호출용. 일반 조회는 hosted proxy가 처리; 데이터셋 `15076352` 활용신청 별도 필요)
+- `KSKILL_BUILDING_REGISTER_API_KEY` (건축물대장 `--direct` 호출용. 일반/주소 조회는 hosted proxy가 처리; 데이터셋 `15134735` 활용신청 별도 필요)
 - `LAW_OC`
 - `KIPRIS_PLUS_API_KEY`
 - `AIR_KOREA_OPEN_API_KEY`

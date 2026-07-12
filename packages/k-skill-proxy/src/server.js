@@ -56,6 +56,7 @@ const { normalizeFscCorpQuery, fetchFscCorpOutline } = require("./fsc-corp");
 const { normalizeG2bSanctionQuery, fetchG2bSanctions } = require("./g2b-sanction");
 const { normalizeG2bOrderPlanQuery, fetchG2bOrderPlans } = require("./g2b-order-plan");
 const { fetchEvCharger, normalizeEvChargerQuery } = require("./ev-charger");
+const { fetchBuildingRegisterTitle, normalizeBuildingRegisterQuery } = require("./building-register");
 const {
   normalizeKoreanLawDetailQuery,
   normalizeKoreanLawSearchQuery,
@@ -213,6 +214,7 @@ function buildConfig(env = process.env) {
     opinetApiKey: trimOrNull(env.OPINET_API_KEY),
     molitApiKey: trimOrNull(env.DATA_GO_KR_API_KEY),
     evChargerApiKey: trimOrNull(env.DATA_GO_KR_API_KEY),
+    buildingRegisterApiKey: trimOrNull(env.DATA_GO_KR_API_KEY),
     data4libraryAuthKey: trimOrNull(env.DATA4LIBRARY_AUTH_KEY),
     foodsafetyKoreaApiKey: trimOrNull(env.FOODSAFETYKOREA_API_KEY),
     kakaoRestApiKey: trimOrNull(env.KAKAO_REST_API_KEY),
@@ -2092,6 +2094,7 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
         fscCorpConfigured: Boolean(config.molitApiKey),
         g2bSanctionConfigured: Boolean(config.molitApiKey),
         evChargerConfigured: Boolean(config.evChargerApiKey),
+        buildingRegisterConfigured: Boolean(config.buildingRegisterApiKey),
         koreanLawConfigured: Boolean(config.lawOc)
       },
       auth: {
@@ -2970,6 +2973,44 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
 
   app.get("/v1/ev-charger/info", async (request, reply) => handleEvChargerRoute("info", request, reply));
   app.get("/v1/ev-charger/status", async (request, reply) => handleEvChargerRoute("status", request, reply));
+
+  app.get("/v1/building-register/title", async (request, reply) => {
+    let normalized;
+    try {
+      normalized = normalizeBuildingRegisterQuery(request.query || {});
+    } catch (error) {
+      reply.code(400);
+      return { error: "bad_request", message: error.message };
+    }
+
+    const cacheKey = makeCacheKey({ route: "building-register-title", ...normalized });
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return {
+        ...cached,
+        proxy: { ...cached.proxy, cache: { hit: true, ttl_ms: config.cacheTtlMs } }
+      };
+    }
+
+    const result = await fetchBuildingRegisterTitle({
+      params: normalized,
+      serviceKey: config.buildingRegisterApiKey
+    });
+    if (result.error) {
+      reply.code(result.status_code || 502);
+      return result;
+    }
+    const payload = {
+      ...result,
+      proxy: {
+        name: config.proxyName,
+        cache: { hit: false, ttl_ms: config.cacheTtlMs },
+        requested_at: new Date().toISOString()
+      }
+    };
+    cache.set(cacheKey, payload, config.cacheTtlMs);
+    return payload;
+  });
 
   app.get("/v1/nhis/long-term-care", async (request, reply) => {
     let normalized;

@@ -7020,3 +7020,18 @@ test("health endpoint reports evChargerConfigured from DATA_GO_KR_API_KEY", asyn
   assert.equal(offBody.upstreams.evChargerConfigured, false);
   assert.equal(onBody.upstreams.evChargerConfigured, true);
 });
+
+test("health endpoint reports buildingRegisterConfigured from DATA_GO_KR_API_KEY", async (t) => {
+  const off = buildServer({ env: {} });
+  const on = buildServer({ env: { DATA_GO_KR_API_KEY: "server-key" } });
+  t.after(async () => {
+    await off.close();
+    await on.close();
+  });
+
+  const offBody = (await off.inject({ method: "GET", url: "/health" })).json();
+  const onBody = (await on.inject({ method: "GET", url: "/health" })).json();
+
+  assert.equal(offBody.upstreams.buildingRegisterConfigured, false);
+  assert.equal(onBody.upstreams.buildingRegisterConfigured, true);
+});

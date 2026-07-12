@@ -11,6 +11,7 @@
 - Kakao Local API endpoint host: https://dapi.kakao.com/v2/local/ — `k-skill-proxy`의 `/v1/kakao-local/geocode`가 `/search/address.json` → empty result 시 `/search/keyword.json` 순서로 중계한다. 같은 host의 `/search/keyword.json`, `/search/category.json`, `/geo/coord2address.json`, `/geo/coord2regioncode.json` 은 `kakao-map` 스킬용 `/v1/kakao-map/*` 라우트가 직접 중계한다.
 - Kakao Mobility Directions endpoint: https://apis-navi.kakaomobility.com/v1/directions — `k-skill-proxy`의 `/v1/kakao-mobility/directions`가 운영자 `KAKAO_REST_API_KEY`를 `Authorization: KakaoAK ...` 헤더로 주입해 자동차 길찾기를 중계한다.
 - 공공데이터포털 전기자동차 충전소 정보 API: https://www.data.go.kr/data/15076352/openapi.do — `k-skill-proxy`의 `/v1/ev-charger/info`와 `/v1/ev-charger/status`가 `getChargerInfo`, `getChargerStatus`를 중계한다. 기존 공공데이터포털 키와 별개로 데이터셋 활용신청이 필요하며 자동승인 대상이다.
+- 공공데이터포털 건축물대장정보 서비스: https://www.data.go.kr/data/15134735/openapi.do — 공식 `https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo` XML을 `/v1/building-register/title`이 파싱한다. 주소 입력은 `/v1/kakao-local/geocode`의 10자리 법정동 `b_code`와 필지 번호를 먼저 사용한다. 기존 키와 별개로 데이터셋 활용신청이 필요하며 자동승인 대상이다.
 - 전국전기차충전소표준데이터: https://www.data.go.kr/data/15013115/standard.do — live API 실패 시 포털에서 사용자가 직접 내려받은 CSV를 정적/수동 fallback으로만 사용한다. 문서화되지 않은 CSV URL은 추측하지 않는다.
 - 숲나들e 공식 사이트: https://foresttrip.go.kr/index.jsp
 - 숲나들e 로그인: https://www.foresttrip.go.kr/com/login.do
