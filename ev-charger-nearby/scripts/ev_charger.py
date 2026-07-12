@@ -128,6 +128,9 @@ def http_get_json(url: str, timeout: int, via_proxy: bool) -> Dict[str, Any]:
         if via_proxy:
             raise HelperError(f"{PROXY_DOWN_MSG} (상세: {error.reason})") from error
         raise HelperError(f"상류 API 네트워크 오류: {error.reason}") from error
+    except TimeoutError as error:
+        target = "프록시 서버" if via_proxy else "상류 API"
+        raise HelperError(f"{target} 요청 시간이 초과되었습니다.") from error
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as error:
@@ -138,6 +141,9 @@ def http_get_json(url: str, timeout: int, via_proxy: bool) -> Dict[str, Any]:
 
 
 def format_text(payload: Dict[str, Any]) -> str:
+    response = payload.get("response")
+    if isinstance(response, dict) and isinstance(response.get("body"), dict):
+        payload = response["body"]
     items_value = payload.get("items") or []
     if isinstance(items_value, dict):
         items_value = items_value.get("item") or []

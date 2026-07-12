@@ -71,6 +71,14 @@ class EvChargerHelperTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("프록시 서버가 응답하지 않습니다", stderr.getvalue())
 
+        with mock.patch.object(ev_charger.urllib.request, "urlopen", side_effect=TimeoutError("timed out")):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = ev_charger.run(["info", "--location", "서울"])
+            self.assertEqual(code, 1)
+            self.assertIn("시간이 초과", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
+
         body = io.BytesIO(json.dumps({"error": "upstream_not_configured"}).encode("utf-8"))
         error = urllib.error.HTTPError("https://example.test", 503, "Service Unavailable", {}, body)
         with mock.patch.object(ev_charger.urllib.request, "urlopen", side_effect=error):
@@ -106,6 +114,11 @@ class EvChargerHelperTests(unittest.TestCase):
             "items": {"item": {"statNm": "직접 호출 충전소", "addr": "서울", "chgerId": "01", "stat": "2"}},
         }
         self.assertIn("직접 호출 충전소", ev_charger.format_text(payload))
+
+        nested = {"response": {"body": payload}}
+        text = ev_charger.format_text(nested)
+        self.assertIn("직접 호출 충전소", text)
+        self.assertIn("1건", text)
 
 
 if __name__ == "__main__":
