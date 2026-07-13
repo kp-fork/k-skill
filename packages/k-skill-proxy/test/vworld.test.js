@@ -76,11 +76,13 @@ test("normalizes and bounds VWorld apartment-price pagination and unit filters",
     () => normalizeVWorldPriceQuery({ pnu: "1150010400104480001", stdrYear: "2026", numOfRows: "1001" }),
     /numOfRows/
   );
+  assert.throws(() => normalizeVWorldPriceQuery({ pnu: "1150010400104480001", stdrYear: "0000" }), /stdrYear/);
+  assert.throws(() => normalizeVWorldPriceQuery({ pnu: "1150010400104480001", stdrYear: "9999" }), /stdrYear/);
 });
 
 test("forwards the header credential only to the fixed VWorld host and redacts echoed secrets", async () => {
   const calls = [];
-  const secret = "vworld-test-secret";
+  const secret = "synthetic+/=credential";
   const result = await proxyVWorldRequest({
     operation: "search",
     params: normalizeVWorldSearchQuery({ query: "강나루현대", type: "place" }),
@@ -88,7 +90,7 @@ test("forwards the header credential only to the fixed VWorld host and redacts e
     fetchImpl: async (url, options) => {
       calls.push({ url: String(url), options });
       return new Response(
-        JSON.stringify({ response: { status: "OK", result: { items: [] }, echoed: secret } }),
+        JSON.stringify({ response: { status: "OK", result: { items: [] }, echoedUrl: String(url) } }),
         { status: 200, headers: { "content-type": "application/json;charset=UTF-8" } }
       );
     }
@@ -99,8 +101,10 @@ test("forwards the header credential only to the fixed VWorld host and redacts e
   assert.equal(upstream.pathname, "/req/search");
   assert.equal(upstream.searchParams.get("key"), secret);
   assert.equal(calls[0].options.headers.accept, "application/json");
+  assert.equal(calls[0].options.redirect, "error");
   assert.equal(result.statusCode, 200);
   assert.doesNotMatch(result.body, new RegExp(secret));
+  assert.doesNotMatch(result.body, new RegExp(encodeURIComponent(secret)));
   assert.match(result.body, /\[REDACTED\]/);
 });
 
@@ -114,15 +118,44 @@ test("requires a credential and recognizes only semantic VWorld successes", asyn
     (error) => error.code === "upstream_not_configured" && error.statusCode === 503
   );
 
-  assert.equal(isVWorldSuccessBody("search", '{"response":{"status":"OK"}}'), true);
+  assert.equal(
+    isVWorldSuccessBody("search", '{"response":{"status":"OK","result":{"items":[]}}}'),
+    true
+  );
   assert.equal(isVWorldSuccessBody("search", '{"response":{"status":"ERROR"}}'), false);
   assert.equal(
-    isVWorldSuccessBody("prices", '{"apartHousingPrices":{"resultCode":""}}'),
+    isVWorldSuccessBody(
+      "prices",
+      '{"apartHousingPrices":{"resultCode":"","totalCount":"0","pageNo":"1","numOfRows":"1000","field":[]}}'
+    ),
     true
   );
   assert.equal(
     isVWorldSuccessBody("prices", '{"apartHousingPrices":{"resultCode":"AUTH"}}'),
     false
+  );
+  assert.equal(isVWorldSuccessBody("search", '{"response":{"status":"OK","result":{}}}'), false);
+  assert.equal(
+    isVWorldSuccessBody("prices", '{"apartHousingPrices":{"resultCode":"","field":[]}}'),
+    false
+  );
+});
+
+test("rejects redirected VWorld responses even when a custom fetch ignores redirect:error", async () => {
+  await assert.rejects(
+    proxyVWorldRequest({
+      operation: "search",
+      params: normalizeVWorldSearchQuery({ query: "강나루현대", type: "place" }),
+      apiKey: "synthetic-secret",
+      fetchImpl: async () => ({
+        redirected: true,
+        url: "https://redirected.example/",
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () => '{"response":{"status":"OK","result":{"items":[]}}}'
+      })
+    }),
+    (error) => error.code === "upstream_error" && error.statusCode === 502
   );
 });
 
@@ -210,4 +243,69 @@ test("VWorld apartment-price route preserves JSON and does not cache semantic er
   assert.equal(recovered.json().apartHousingPrices.field[0].pblntfPc, "587000000");
   assert.deepEqual(cached.json(), recovered.json());
   assert.equal(calls, 2, "semantic failures must not be cached, while the recovered response must be cached");
+});
+
+test("VWorld routes do not cache structurally incomplete success envelopes", async (t) => {
+  const originalFetch = global.fetch;
+  let searchCalls = 0;
+  let priceCalls = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes("/req/search")) {
+      searchCalls += 1;
+      return Response.json({ response: { status: "OK", result: {} } });
+    }
+    priceCalls += 1;
+    return Response.json({ apartHousingPrices: { resultCode: "", field: [] } });
+  };
+  const app = buildServer({ env: { KSKILL_PROXY_CACHE_TTL_MS: "60000" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+  const headers = { "x-k-skill-vworld-api-key": "delegated-secret" };
+  const searchUrl = "/v1/vworld/search?query=test&type=place";
+  const priceUrl = "/v1/vworld/apartment-prices?pnu=1150010400104480001&stdrYear=2026";
+
+  await app.inject({ method: "GET", url: searchUrl, headers });
+  await app.inject({ method: "GET", url: searchUrl, headers });
+  await app.inject({ method: "GET", url: priceUrl, headers });
+  await app.inject({ method: "GET", url: priceUrl, headers });
+
+  assert.equal(searchCalls, 2);
+  assert.equal(priceCalls, 2);
+});
+
+test("encoded credentials never enter the shared successful-response cache", async (t) => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async (url) => {
+    calls += 1;
+    return Response.json({
+      response: { status: "OK", result: { items: [] }, echoedUrl: String(url) }
+    });
+  };
+  const app = buildServer({ env: { KSKILL_PROXY_CACHE_TTL_MS: "60000" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+  const url = "/v1/vworld/search?query=encoded-cache-test&type=place";
+  const secret = "synthetic+/=credential";
+  const first = await app.inject({
+    method: "GET",
+    url,
+    headers: { "x-k-skill-vworld-api-key": secret }
+  });
+  const second = await app.inject({
+    method: "GET",
+    url,
+    headers: { "x-k-skill-vworld-api-key": "different-credential" }
+  });
+
+  assert.equal(calls, 1);
+  for (const body of [first.body, second.body]) {
+    assert.doesNotMatch(body, new RegExp(encodeURIComponent(secret)));
+    assert.doesNotMatch(body, /synthetic\+\/=/);
+    assert.match(body, /\[REDACTED\]/);
+  }
 });

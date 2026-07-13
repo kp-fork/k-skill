@@ -5,6 +5,7 @@ const MAX_DOMAIN_LENGTH = 253;
 const MAX_PAGE = 10000;
 const MAX_SEARCH_SIZE = 100;
 const MAX_PRICE_ROWS = 1000;
+const MIN_PRICE_YEAR = 2005;
 
 function trimOrNull(value) {
   if (value === undefined || value === null) {
@@ -91,8 +92,17 @@ function normalizeVWorldPriceQuery(query = {}) {
     throw new Error("pnu must contain exactly 19 digits.");
   }
   const stdrYear = requireString(query.stdrYear ?? query.year, "stdrYear", 4);
-  if (!/^\d{4}$/.test(stdrYear)) {
-    throw new Error("stdrYear must contain exactly 4 digits.");
+  const currentYear = Number.parseInt(
+    new Intl.DateTimeFormat("en", { timeZone: "Asia/Seoul", year: "numeric" }).format(new Date()),
+    10
+  );
+  const numericYear = Number.parseInt(stdrYear, 10);
+  if (
+    !/^\d{4}$/.test(stdrYear) ||
+    numericYear < MIN_PRICE_YEAR ||
+    numericYear > currentYear
+  ) {
+    throw new Error(`stdrYear must be between ${MIN_PRICE_YEAR} and ${currentYear}.`);
   }
   const dongNm = trimOrNull(query.dongNm ?? query.building);
   const hoNm = trimOrNull(query.hoNm ?? query.unit);
@@ -158,10 +168,24 @@ function buildVWorldUrl(operation, params, apiKey) {
 }
 
 function redactCredential(body, apiKey) {
-  if (!apiKey || !body.includes(apiKey)) {
-    return body;
+  let redacted = String(body);
+  if (!apiKey) {
+    return redacted;
   }
-  return body.split(apiKey).join("[REDACTED]");
+  const raw = String(apiKey);
+  const serialized = new URLSearchParams({ key: raw }).toString().slice("key=".length);
+  const jsonEscaped = JSON.stringify(raw).slice(1, -1);
+  redacted = redacted.split(raw).join("[REDACTED]");
+  for (const candidate of [encodeURIComponent(raw), serialized, jsonEscaped]) {
+    if (candidate) {
+      const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      redacted = redacted.replace(new RegExp(escaped, "giu"), "[REDACTED]");
+    }
+  }
+  return redacted.replace(/(?:^|[?&])key(?:=|%3D)[^&\s"'<>\\]+/giu, (match) => {
+    const prefix = match.startsWith("?") || match.startsWith("&") ? match[0] : "";
+    return `${prefix}key=[REDACTED]`;
+  });
 }
 
 function isVWorldSuccessBody(operation, body) {
@@ -172,10 +196,17 @@ function isVWorldSuccessBody(operation, body) {
     return false;
   }
   if (operation === "search") {
-    return payload?.response?.status === "OK";
+    return payload?.response?.status === "OK" && Array.isArray(payload?.response?.result?.items);
   }
   if (operation === "prices") {
-    return payload?.apartHousingPrices?.resultCode === "";
+    const prices = payload?.apartHousingPrices;
+    return (
+      prices?.resultCode === "" &&
+      /^\d+$/.test(prices?.totalCount || "") &&
+      /^\d+$/.test(prices?.pageNo || "") &&
+      /^\d+$/.test(prices?.numOfRows || "") &&
+      Array.isArray(prices?.field)
+    );
   }
   return false;
 }
@@ -205,14 +236,38 @@ async function proxyVWorldRequest({
   try {
     response = await fetchImpl(url, {
       headers: { accept: "application/json" },
+      redirect: "error",
       signal: AbortSignal.timeout(15000)
     });
-  } catch (cause) {
+  } catch {
     const error = new Error("VWorld upstream request failed.");
     error.code = "upstream_error";
     error.statusCode = 502;
-    void cause;
     throw error;
+  }
+
+  if (response.redirected || (response.status >= 300 && response.status < 400)) {
+    const error = new Error("VWorld upstream redirect was rejected.");
+    error.code = "upstream_error";
+    error.statusCode = 502;
+    throw error;
+  }
+  if (response.url) {
+    let finalUrl;
+    try {
+      finalUrl = new URL(response.url);
+    } catch {
+      const error = new Error("VWorld upstream returned an invalid final URL.");
+      error.code = "upstream_error";
+      error.statusCode = 502;
+      throw error;
+    }
+    if (finalUrl.origin !== url.origin || finalUrl.pathname !== url.pathname) {
+      const error = new Error("VWorld upstream final URL was rejected.");
+      error.code = "upstream_error";
+      error.statusCode = 502;
+      throw error;
+    }
   }
 
   const body = redactCredential(await response.text(), credential);
