@@ -289,8 +289,8 @@ function projectVWorldBody(operation, body, apiKey) {
       throw error;
     }
     const field = prices.field.slice(0, MAX_PRICE_ROWS).map((record) => ({
-      pnu: projectString(record?.pnu, apiKey, 19),
-      stdrYear: projectString(record?.stdrYear, apiKey, 4),
+      pnu: projectString(record?.pnu, apiKey, 64),
+      stdrYear: projectString(record?.stdrYear, apiKey, 16),
       aphusNm: projectString(record?.aphusNm, apiKey, 300),
       dongNm: projectString(record?.dongNm, apiKey, 100),
       hoNm: projectString(record?.hoNm, apiKey, 100),

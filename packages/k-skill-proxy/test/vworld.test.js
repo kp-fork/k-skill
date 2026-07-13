@@ -5,6 +5,7 @@ const {
   isVWorldSuccessBody,
   normalizeVWorldPriceQuery,
   normalizeVWorldSearchQuery,
+  projectVWorldBody,
   proxyVWorldRequest
 } = require("../src/vworld");
 const { buildServer } = require("../src/server");
@@ -139,6 +140,36 @@ test("requires a credential and recognizes only semantic VWorld successes", asyn
     isVWorldSuccessBody("prices", '{"apartHousingPrices":{"resultCode":"","field":[]}}'),
     false
   );
+});
+
+test("response projection never truncates an invalid price identity into a valid one", () => {
+  const body = projectVWorldBody(
+    "prices",
+    JSON.stringify({
+      apartHousingPrices: {
+        resultCode: "",
+        resultMsg: "",
+        totalCount: "1",
+        pageNo: "1",
+        numOfRows: "1000",
+        field: [{
+          pnu: "11500104001044800010",
+          stdrYear: "2026-extra",
+          aphusNm: "강나루현대",
+          dongNm: "101",
+          hoNm: "1601",
+          floorNm: "16",
+          prvuseAr: "59.76",
+          pblntfPc: "587000000"
+        }]
+      }
+    }),
+    "synthetic-secret"
+  );
+  const record = JSON.parse(body).apartHousingPrices.field[0];
+
+  assert.equal(record.pnu, "11500104001044800010");
+  assert.equal(record.stdrYear, "2026-extra");
 });
 
 test("rejects redirected VWorld responses even when a custom fetch ignores redirect:error", async () => {
